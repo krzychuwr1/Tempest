@@ -12,6 +12,7 @@ class Encoder;
 class StorageImage;
 
 class CommandBuffer;
+namespace Detail { struct VulkanInteropAccess; }
 
 //! simple 2d texture class
 class Texture2d final {
@@ -41,6 +42,7 @@ class Texture2d final {
   friend class Tempest::DescriptorSet;
   friend class Encoder<Tempest::CommandBuffer>;
   friend class Tempest::StorageImage;
+  friend struct Tempest::Detail::VulkanInteropAccess;
 
   template<class T>
   friend class Tempest::Detail::ResourcePtr;

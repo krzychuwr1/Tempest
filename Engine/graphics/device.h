@@ -189,6 +189,7 @@ class Device {
   friend class DescriptorSet;
 
   friend class Texture2d;
+  friend struct Detail::VulkanInteropAccess;
   };
 
 template<class T>

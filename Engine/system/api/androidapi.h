@@ -4,15 +4,38 @@
 #include <filesystem>
 
 struct ANativeWindow;
+struct ANativeActivity;
 
 namespace Tempest {
 
 class AndroidApi final : SystemApi {
   public:
+    struct GamepadState {
+      enum Button : uint8_t {
+        A, B, X, Y, LeftShoulder, RightShoulder, LeftStick, RightStick, Start, Back,
+        DpadUp, DpadDown, DpadLeft, DpadRight, Count
+        };
+      bool  connected = false;
+      float lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0;
+      bool  buttons[Count] = {};
+      };
+
     static std::filesystem::path internalDataPath();
     static std::filesystem::path externalDataPath();
     // Current window of the activity, or null while it is hidden or for another activity
     static ANativeWindow*        nativeWindow(SystemApi::Window* w);
+    static ANativeActivity*      activity();
+
+    // Presentation owned by the application (for example an OpenXR session) instead of the activity's window:
+    // the main window reports this client size and UI scale, and renders whether or not Android shows a window.
+    static void                  setExternalPresentation(int width, int height, float uiScale);
+    static bool                  hasExternalPresentation();
+
+    // Latest state of a Bluetooth/USB gamepad; its buttons never reach the window as key events.
+    static GamepadState          gamepad();
+
+    // Pointer capture delivers relative mouse motion.
+    static void                  setPointerCapture(bool capture);
 
   private:
     AndroidApi() = default;
@@ -21,6 +44,9 @@ class AndroidApi final : SystemApi {
     static void onAppCmd(void* app, int32_t cmd);
     static int32_t onInputEvent(const void* event);
     static bool processTouchEvents(AppCallBack& cb);
+    static bool processKeyEvent(const void* event);
+    static bool processMouseEvent(const void* event);
+    static Rect implClientRectOf();
     static void updateFocus();
     static void updateWindow();
 

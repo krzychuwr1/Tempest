@@ -12,6 +12,10 @@
 #include <android/native_window.h>
 #include <android/input.h>
 #include <android/configuration.h>
+#include <android/keycodes.h>
+#include <jni.h>
+
+#include <algorithm>
 
 #include <atomic>
 #include <cassert>
@@ -41,6 +45,15 @@ static bool             resumed    = false;
 static bool             focused    = false;
 static bool             active     = false;
 static bool             hasWindow  = false;
+
+static bool             externalPresentation = false;
+static int              externalW            = 0;
+static int              externalH            = 0;
+static float            externalUiScale      = 1.f;
+
+static AndroidApi::GamepadState gamepadState;
+static Point                    mouseLast;
+static bool                     mouseValid = false;
 
 // Touches are recorded during polling and dispatched one per event-processing pass.
 // Modal loops in event handlers poll recursively, so direct dispatch could reorder pointers of one AInputEvent.
@@ -90,6 +103,90 @@ static void releaseAllTouches() {
     }
   }
 
+static Event::KeyType androidKey(int32_t code) {
+  if(code>=AKEYCODE_A && code<=AKEYCODE_Z)
+    return Event::KeyType(Event::K_A + (code-AKEYCODE_A));
+  if(code>=AKEYCODE_0 && code<=AKEYCODE_9)
+    return Event::KeyType(Event::K_0 + (code-AKEYCODE_0));
+  if(code>=AKEYCODE_F1 && code<=AKEYCODE_F12)
+    return Event::KeyType(Event::K_F1 + (code-AKEYCODE_F1));
+  switch(code) {
+    case AKEYCODE_ESCAPE:        return Event::K_ESCAPE;
+    case AKEYCODE_CTRL_LEFT:     return Event::K_LControl;
+    case AKEYCODE_CTRL_RIGHT:    return Event::K_RControl;
+    case AKEYCODE_SHIFT_LEFT:    return Event::K_LShift;
+    case AKEYCODE_SHIFT_RIGHT:   return Event::K_RShift;
+    case AKEYCODE_ALT_LEFT:      return Event::K_LAlt;
+    case AKEYCODE_ALT_RIGHT:     return Event::K_RAlt;
+    case AKEYCODE_META_LEFT:     return Event::K_LCommand;
+    case AKEYCODE_META_RIGHT:    return Event::K_RCommand;
+    case AKEYCODE_INSERT:        return Event::K_Insert;
+    case AKEYCODE_FORWARD_DEL:   return Event::K_Delete;
+    case AKEYCODE_MOVE_HOME:     return Event::K_Home;
+    case AKEYCODE_MOVE_END:      return Event::K_End;
+    case AKEYCODE_PAGE_UP:       return Event::K_PageUp;
+    case AKEYCODE_PAGE_DOWN:     return Event::K_PageDown;
+    case AKEYCODE_DPAD_LEFT:     return Event::K_Left;
+    case AKEYCODE_DPAD_UP:       return Event::K_Up;
+    case AKEYCODE_DPAD_RIGHT:    return Event::K_Right;
+    case AKEYCODE_DPAD_DOWN:     return Event::K_Down;
+    case AKEYCODE_DEL:           return Event::K_Back;
+    case AKEYCODE_TAB:           return Event::K_Tab;
+    case AKEYCODE_ENTER:         return Event::K_Return;
+    case AKEYCODE_NUMPAD_ENTER:  return Event::K_Return;
+    case AKEYCODE_BREAK:         return Event::K_Pause;
+    case AKEYCODE_SPACE:         return Event::K_Space;
+    case AKEYCODE_CAPS_LOCK:     return Event::K_CapsLock;
+    }
+  return Event::K_NoKey;
+  }
+
+static uint32_t translateChar(int32_t code, int32_t meta) {
+  const bool shift = (meta & (AMETA_SHIFT_ON|AMETA_CAPS_LOCK_ON))!=0;
+  if(code>=AKEYCODE_A && code<=AKEYCODE_Z)
+    return uint32_t((shift ? 'A' : 'a') + (code-AKEYCODE_A));
+  if(code>=AKEYCODE_0 && code<=AKEYCODE_9 && !shift)
+    return uint32_t('0' + (code-AKEYCODE_0));
+  switch(code) {
+    case AKEYCODE_SPACE:  return ' ';
+    case AKEYCODE_MINUS:  return shift ? '_' : '-';
+    case AKEYCODE_PERIOD: return shift ? '>' : '.';
+    case AKEYCODE_COMMA:  return shift ? '<' : ',';
+    }
+  return 0;
+  }
+
+static Event::Modifier translateModifiers(int32_t meta) {
+  uint8_t m = Event::M_NoModifier;
+  if(meta & AMETA_SHIFT_ON) m |= Event::M_Shift;
+  if(meta & AMETA_ALT_ON)   m |= Event::M_Alt;
+  if(meta & AMETA_CTRL_ON)  m |= Event::M_Ctrl;
+  return Event::Modifier(m);
+  }
+
+static int gamepadButton(int32_t code) {
+  using B = AndroidApi::GamepadState;
+  switch(code) {
+    case AKEYCODE_BUTTON_A:      return B::A;
+    case AKEYCODE_BUTTON_B:      return B::B;
+    case AKEYCODE_BUTTON_X:      return B::X;
+    case AKEYCODE_BUTTON_Y:      return B::Y;
+    case AKEYCODE_BUTTON_L1:     return B::LeftShoulder;
+    case AKEYCODE_BUTTON_R1:     return B::RightShoulder;
+    case AKEYCODE_BUTTON_THUMBL: return B::LeftStick;
+    case AKEYCODE_BUTTON_THUMBR: return B::RightStick;
+    case AKEYCODE_BUTTON_START:  return B::Start;
+    case AKEYCODE_BUTTON_SELECT: return B::Back;
+    case AKEYCODE_BUTTON_MODE:   return B::Back;
+    }
+  return -1;
+  }
+
+static bool isGamepadSource(int32_t source) {
+  return (source & AINPUT_SOURCE_GAMEPAD)==AINPUT_SOURCE_GAMEPAD ||
+         (source & AINPUT_SOURCE_JOYSTICK)==AINPUT_SOURCE_JOYSTICK;
+  }
+
 std::filesystem::path AndroidApi::internalDataPath() {
   assert(app!=nullptr && app->activity!=nullptr);
   return app->activity->internalDataPath;
@@ -99,6 +196,62 @@ std::filesystem::path AndroidApi::externalDataPath() {
   assert(app!=nullptr && app->activity!=nullptr);
   const char* path = app->activity->externalDataPath;
   return path!=nullptr ? path : "";
+  }
+
+ANativeActivity* AndroidApi::activity() {
+  return app!=nullptr ? app->activity : nullptr;
+  }
+
+void AndroidApi::setExternalPresentation(int width, int height, float uiScale) {
+  externalPresentation = width>0 && height>0;
+  externalW            = width;
+  externalH            = height;
+  externalUiScale      = uiScale;
+  if(mainWindow!=nullptr && externalPresentation) {
+    SizeEvent event(externalW,externalH);
+    AndroidApi::dispatchResize(*mainWindow,event);
+    }
+  }
+
+bool AndroidApi::hasExternalPresentation() {
+  return externalPresentation;
+  }
+
+AndroidApi::GamepadState AndroidApi::gamepad() {
+  return gamepadState;
+  }
+
+void AndroidApi::setPointerCapture(bool capture) {
+  if(app==nullptr || app->activity==nullptr || app->activity->vm==nullptr)
+    return;
+  JNIEnv* env      = nullptr;
+  bool    attached = false;
+  if(app->activity->vm->GetEnv(reinterpret_cast<void**>(&env),JNI_VERSION_1_6)!=JNI_OK) {
+    if(app->activity->vm->AttachCurrentThread(&env,nullptr)!=JNI_OK)
+      return;
+    attached = true;
+    }
+  jobject   activityObj = app->activity->clazz;
+  jclass    activityCls = env->GetObjectClass(activityObj);
+  jmethodID getWindow   = env->GetMethodID(activityCls,"getWindow","()Landroid/view/Window;");
+  jobject   window      = env->CallObjectMethod(activityObj,getWindow);
+  if(window!=nullptr) {
+    jclass    windowCls = env->GetObjectClass(window);
+    jmethodID getDecor  = env->GetMethodID(windowCls,"getDecorView","()Landroid/view/View;");
+    jobject   decor     = env->CallObjectMethod(window,getDecor);
+    if(decor!=nullptr) {
+      jclass    viewCls = env->GetObjectClass(decor);
+      jmethodID method  = env->GetMethodID(viewCls,capture ? "requestPointerCapture" : "releasePointerCapture","()V");
+      if(method!=nullptr)
+        env->CallVoidMethod(decor,method);
+      }
+    }
+  if(env->ExceptionCheck()) {
+    env->ExceptionClear();
+    Log::e("AndroidApi: pointer capture request failed");
+    }
+  if(attached)
+    app->activity->vm->DetachCurrentThread();
   }
 
 void AndroidApi::updateFocus() {
@@ -117,7 +270,7 @@ void AndroidApi::updateWindow() {
     return;
 
   hasWindow = true;
-  if(mainWindow==nullptr)
+  if(mainWindow==nullptr || externalPresentation)
     return;
 
   SizeEvent event(ANativeWindow_getWidth(app->window),ANativeWindow_getHeight(app->window));
@@ -134,7 +287,7 @@ void AndroidApi::onAppCmd(void*, int32_t cmd) {
       break;
     case APP_CMD_CONFIG_CHANGED: {
       //TODO: dedicated event for dpi/safe-rects
-      if(mainWindow!=nullptr && app!=nullptr && app->window!=nullptr) {
+      if(mainWindow!=nullptr && app!=nullptr && app->window!=nullptr && !externalPresentation) {
         SizeEvent event(ANativeWindow_getWidth(app->window), ANativeWindow_getHeight(app->window));
         SystemApi::dispatchResize(*mainWindow, event);
         }
@@ -173,8 +326,137 @@ void AndroidApi::onAppCmd(void*, int32_t cmd) {
     }
   }
 
+bool AndroidApi::processKeyEvent(const void* input) {
+  const auto    event  = static_cast<const AInputEvent*>(input);
+  const int32_t code   = AKeyEvent_getKeyCode(event);
+  const int32_t action = AKeyEvent_getAction(event);
+  if(action!=AKEY_EVENT_ACTION_DOWN && action!=AKEY_EVENT_ACTION_UP)
+    return false;
+  const bool down = action==AKEY_EVENT_ACTION_DOWN;
+
+  const int button = gamepadButton(code);
+  if(button>=0) {
+    gamepadState.buttons[button] = down;
+    gamepadState.connected       = true;
+    return true;
+    }
+  if(code==AKEYCODE_BACK || code==AKEYCODE_VOLUME_UP || code==AKEYCODE_VOLUME_DOWN)
+    return false;
+
+  const int32_t meta = AKeyEvent_getMetaState(event);
+  const Event::KeyType kt  = androidKey(code);
+  const uint32_t       chr = translateChar(code,meta);
+  if(kt==Event::K_NoKey && chr==0)
+    return false;
+  if(mainWindow==nullptr)
+    return true;
+  if(down && AKeyEvent_getRepeatCount(event)>0 && kt!=Event::K_Back)
+    return true;
+
+  KeyEvent e(kt, chr, translateModifiers(meta), down ? Event::KeyDown : Event::KeyUp);
+  const uint32_t scan = uint32_t(AKeyEvent_getScanCode(event));
+  if(down)
+    SystemApi::dispatchKeyDown(*mainWindow,e,scan); else
+    SystemApi::dispatchKeyUp  (*mainWindow,e,scan);
+  return true;
+  }
+
+bool AndroidApi::processMouseEvent(const void* input) {
+  const auto    event  = static_cast<const AInputEvent*>(input);
+  const int32_t source = AInputEvent_getSource(event);
+  const int32_t action = AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK;
+  if(mainWindow==nullptr)
+    return true;
+
+  const bool relative = (source & AINPUT_SOURCE_MOUSE_RELATIVE)==AINPUT_SOURCE_MOUSE_RELATIVE;
+  float dx = 0, dy = 0;
+  const Point pos = AMotionEvent_getXY(event,0);
+  if(relative) {
+    dx = AMotionEvent_getX(event,0);
+    dy = AMotionEvent_getY(event,0);
+    } else {
+    dx = AMotionEvent_getAxisValue(event,AMOTION_EVENT_AXIS_RELATIVE_X,0);
+    dy = AMotionEvent_getAxisValue(event,AMOTION_EVENT_AXIS_RELATIVE_Y,0);
+    if(dx==0 && dy==0 && mouseValid) {
+      dx = float(pos.x-mouseLast.x);
+      dy = float(pos.y-mouseLast.y);
+      }
+    mouseLast  = pos;
+    mouseValid = true;
+    }
+
+  // The game reads mouse-look as the offset from the window centre (desktop recentres the cursor every event)
+  const Rect  rect   = implClientRectOf();
+  const Point center = Point(rect.w/2,rect.h/2);
+  const Point at     = Point(center.x+int(dx), center.y+int(dy));
+
+  switch(action) {
+    case AMOTION_EVENT_ACTION_BUTTON_PRESS:
+    case AMOTION_EVENT_ACTION_BUTTON_RELEASE: {
+      // AMotionEvent_getActionButton needs API 33: compare the whole button state instead
+      static int32_t pressed = 0;
+      const int32_t  now     = AMotionEvent_getButtonState(event);
+      const struct { int32_t bit; Event::MouseButton b; } map[] = {
+        {AMOTION_EVENT_BUTTON_PRIMARY,   Event::ButtonLeft },
+        {AMOTION_EVENT_BUTTON_SECONDARY, Event::ButtonRight},
+        {AMOTION_EVENT_BUTTON_TERTIARY,  Event::ButtonMid  },
+        };
+      for(auto& m:map) {
+        const bool was = (pressed & m.bit)!=0;
+        const bool is  = (now     & m.bit)!=0;
+        if(was==is)
+          continue;
+        MouseEvent e(center.x, center.y, m.b, Event::M_NoModifier, 0, 0, is ? Event::MouseDown : Event::MouseUp);
+        if(is)
+          SystemApi::dispatchMouseDown(*mainWindow,e); else
+          SystemApi::dispatchMouseUp  (*mainWindow,e);
+        }
+      pressed = now;
+      return true;
+      }
+    case AMOTION_EVENT_ACTION_SCROLL: {
+      const float v = AMotionEvent_getAxisValue(event,AMOTION_EVENT_AXIS_VSCROLL,0);
+      MouseEvent e(center.x, center.y, Event::ButtonNone, Event::M_NoModifier, int(v*120.f), 0, Event::MouseWheel);
+      SystemApi::dispatchMouseWheel(*mainWindow,e);
+      return true;
+      }
+    case AMOTION_EVENT_ACTION_HOVER_MOVE:
+    case AMOTION_EVENT_ACTION_MOVE: {
+      if(dx==0 && dy==0)
+        return true;
+      MouseEvent e(at.x, at.y, Event::ButtonNone, Event::M_NoModifier, 0, 0, Event::MouseMove);
+      SystemApi::dispatchMouseMove(*mainWindow,e);
+      return true;
+      }
+    }
+  return true;
+  }
+
 int32_t AndroidApi::onInputEvent(const void* input) {
-  const auto event = static_cast<const AInputEvent*>(input);
+  const auto    event  = static_cast<const AInputEvent*>(input);
+  const int32_t source = AInputEvent_getSource(event);
+  if(AInputEvent_getType(event)==AINPUT_EVENT_TYPE_KEY)
+    return processKeyEvent(event) ? 1 : 0;
+  if(AInputEvent_getType(event)==AINPUT_EVENT_TYPE_MOTION && isGamepadSource(source)) {
+    auto axis = [event](int32_t a) { return AMotionEvent_getAxisValue(event,a,0); };
+    gamepadState.connected = true;
+    gamepadState.lx = axis(AMOTION_EVENT_AXIS_X);
+    gamepadState.ly = axis(AMOTION_EVENT_AXIS_Y);
+    gamepadState.rx = axis(AMOTION_EVENT_AXIS_Z);
+    gamepadState.ry = axis(AMOTION_EVENT_AXIS_RZ);
+    gamepadState.lt = std::max(axis(AMOTION_EVENT_AXIS_LTRIGGER),axis(AMOTION_EVENT_AXIS_BRAKE));
+    gamepadState.rt = std::max(axis(AMOTION_EVENT_AXIS_RTRIGGER),axis(AMOTION_EVENT_AXIS_GAS));
+    const float hx = axis(AMOTION_EVENT_AXIS_HAT_X);
+    const float hy = axis(AMOTION_EVENT_AXIS_HAT_Y);
+    gamepadState.buttons[GamepadState::DpadLeft]  = hx<-0.5f;
+    gamepadState.buttons[GamepadState::DpadRight] = hx> 0.5f;
+    gamepadState.buttons[GamepadState::DpadUp]    = hy<-0.5f;
+    gamepadState.buttons[GamepadState::DpadDown]  = hy> 0.5f;
+    return 1;
+    }
+  if(AInputEvent_getType(event)==AINPUT_EVENT_TYPE_MOTION &&
+     ((source & AINPUT_SOURCE_MOUSE)==AINPUT_SOURCE_MOUSE || (source & AINPUT_SOURCE_MOUSE_RELATIVE)==AINPUT_SOURCE_MOUSE_RELATIVE))
+    return processMouseEvent(event) ? 1 : 0;
   if(AInputEvent_getType(event)!=AINPUT_EVENT_TYPE_MOTION ||
      (AInputEvent_getSource(event) & AINPUT_SOURCE_TOUCHSCREEN)!=AINPUT_SOURCE_TOUCHSCREEN)
     return 0;
@@ -289,7 +571,17 @@ ANativeWindow* AndroidApi::nativeWindow(SystemApi::Window* w) {
   return app->window;
   }
 
+Rect AndroidApi::implClientRectOf() {
+  if(externalPresentation)
+    return Rect(0,0,externalW,externalH);
+  if(app==nullptr || app->window==nullptr)
+    return Rect();
+  return Rect(0,0,ANativeWindow_getWidth(app->window),ANativeWindow_getHeight(app->window));
+  }
+
 Rect AndroidApi::implWindowClientRect(SystemApi::Window* w) {
+  if(externalPresentation)
+    return Rect(0,0,externalW,externalH);
   const auto window = nativeWindow(w);
   if(window==nullptr)
     return Rect();
@@ -297,6 +589,8 @@ Rect AndroidApi::implWindowClientRect(SystemApi::Window* w) {
   }
 
 float AndroidApi::implUiScale(SystemApi::Window*) {
+  if(externalPresentation)
+    return externalUiScale;
   const auto density = AConfiguration_getDensity(app->config);
   if(density==ACONFIGURATION_DENSITY_DEFAULT || density==ACONFIGURATION_DENSITY_ANY || density==ACONFIGURATION_DENSITY_NONE)
     return 1.f;
@@ -339,7 +633,7 @@ void AndroidApi::implProcessEvents(AppCallBack& cb) {
 
   int                  pending = 0;
   android_poll_source* source  = nullptr;
-  const bool          visible = active && hasWindow;
+  const bool          visible = externalPresentation ? resumed : (active && hasWindow);
   if(ALooper_pollOnce(visible ? 0 : -1,nullptr,&pending,reinterpret_cast<void**>(&source))>=0) {
     if (source != nullptr)
       source->process(app, source);

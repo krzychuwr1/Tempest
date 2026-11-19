@@ -1,6 +1,7 @@
 #if defined(TEMPEST_BUILD_VULKAN)
 
 #include "vulkanapi.h"
+#include "vulkaninterop.h"
 
 #include "vulkan/vdevice.h"
 #include "vulkan/vswapchain.h"
@@ -14,6 +15,8 @@
 #include "vulkan/vaccelerationstructure.h"
 
 #include <Tempest/Pixmap>
+#include <Tempest/Device>
+#include <Tempest/Attachment>
 #include <Tempest/Log>
 #include <Tempest/Application>
 
@@ -155,7 +158,9 @@ struct Tempest::VulkanApi::Impl {
       createInfo.enabledLayerCount   = 0;
       }
 
-    VkResult ret = vkCreateInstance(&createInfo,nullptr,&instance);
+    auto&    hooks = vulkanCreateHooks();
+    VkResult ret   = hooks.createInstance!=nullptr ? hooks.createInstance(hooks.context,&createInfo,&instance) :
+                                                     vkCreateInstance(&createInfo,nullptr,&instance);
     if(ret!=VK_SUCCESS)
       throw std::system_error(Tempest::GraphicsErrc::NoDevice);
 
@@ -236,7 +241,11 @@ std::vector<AbstractGraphicsApi::Props> VulkanApi::devices() const {
   vkEnumeratePhysicalDevices(impl->instance, &deviceCount, devices.data());
 
   devList.reserve(devices.size());
+  const auto& hooks    = vulkanCreateHooks();
+  const auto  required = hooks.physicalDevice!=nullptr ? hooks.physicalDevice(hooks.context,impl->instance) : VK_NULL_HANDLE;
   for(auto device : devices) {
+    if(required!=VK_NULL_HANDLE && device!=required)
+      continue;
     VDevice::VkProps props = {};
     VDevice::deviceProps(impl->instance, impl->hasDeviceFeatures2, device, props);
     VDevice::deviceQueueProps(device, props);
@@ -257,7 +266,11 @@ AbstractGraphicsApi::Device* VulkanApi::createDevice(std::string_view gpuName) {
   std::vector<VkPhysicalDevice> devices(deviceCount);
   vkEnumeratePhysicalDevices(impl->instance, &deviceCount, devices.data());
 
+  const auto& hooks    = vulkanCreateHooks();
+  const auto  required = hooks.physicalDevice!=nullptr ? hooks.physicalDevice(hooks.context,impl->instance) : VK_NULL_HANDLE;
   for(const auto& device:devices) {
+    if(required!=VK_NULL_HANDLE && device!=required)
+      continue;
     VDevice::VkProps props = {};
     VDevice::deviceProps(impl->instance, impl->hasDeviceFeatures2, device, props);
     if(!gpuName.empty() && gpuName!=props.name)
@@ -273,6 +286,36 @@ AbstractGraphicsApi::Device* VulkanApi::createDevice(std::string_view gpuName) {
     }
 
   throw std::system_error(Tempest::GraphicsErrc::NoDevice);
+  }
+
+VulkanCreateHooks& Tempest::vulkanCreateHooks() {
+  static VulkanCreateHooks hooks;
+  return hooks;
+  }
+
+struct Tempest::Detail::VulkanInteropAccess {
+  static VulkanNativeContext context(Tempest::Device& source) {
+    auto* d = dynamic_cast<VDevice*>(source.dev);
+    if(d==nullptr || d->graphicsQueue==nullptr)
+      throw std::system_error(Tempest::GraphicsErrc::NoDevice);
+    return {d->instance, d->physicalDevice, d->device.impl, d->graphicsQueue->impl,
+            d->graphicsQueue->family, &d->graphicsQueue->sync};
+    }
+  static VulkanNativeImage image(const Tempest::Attachment& source) {
+    auto& tex = textureCast<const Texture2d&>(source);
+    auto* img = dynamic_cast<VTexture*>(tex.impl.handler);
+    if(img==nullptr)
+      return {};
+    return {img->impl, img->format, img->defaultLayout()};
+    }
+  };
+
+VulkanNativeContext Tempest::vulkanNativeContext(Tempest::Device& device) {
+  return Detail::VulkanInteropAccess::context(device);
+  }
+
+VulkanNativeImage Tempest::vulkanNativeImage(const Tempest::Attachment& image) {
+  return Detail::VulkanInteropAccess::image(image);
   }
 
 AbstractGraphicsApi::Swapchain *VulkanApi::createSwapchain(SystemApi::Window *w, AbstractGraphicsApi::Device *d) {

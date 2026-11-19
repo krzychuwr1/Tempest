@@ -1,6 +1,14 @@
 #if defined(TEMPEST_BUILD_VULKAN)
 
 #include "vdevice.h"
+#include "../vulkaninterop.h"
+
+static VkResult createVkDevice(VkPhysicalDevice pdev, const VkDeviceCreateInfo& info, VkDevice& out) {
+  auto& hooks = Tempest::vulkanCreateHooks();
+  if(hooks.createDevice!=nullptr)
+    return hooks.createDevice(hooks.context, pdev, &info, &out);
+  return vkCreateDevice(pdev, &info, nullptr, &out);
+  }
 
 #include "vcommandbuffer.h"
 #include "vdescriptorallocator.h"
@@ -317,10 +325,10 @@ void VDevice::createLogicalDevice(VkPhysicalDevice pdev) {
 
     createInfo.pNext            = &features;
     createInfo.pEnabledFeatures = nullptr;
-    if(vkCreateDevice(pdev, &createInfo, nullptr, &device.impl)!=VK_SUCCESS)
+    if(createVkDevice(pdev, createInfo, device.impl)!=VK_SUCCESS)
       throw std::system_error(Tempest::GraphicsErrc::NoDevice);
     } else {
-    if(vkCreateDevice(pdev, &createInfo, nullptr, &device.impl)!=VK_SUCCESS)
+    if(createVkDevice(pdev, createInfo, device.impl)!=VK_SUCCESS)
       throw std::system_error(Tempest::GraphicsErrc::NoDevice);
     }
 
