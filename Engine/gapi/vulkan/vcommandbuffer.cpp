@@ -1,6 +1,9 @@
+#include <algorithm>
+#include <cstdio>
 #if defined(TEMPEST_BUILD_VULKAN)
 
 #include "vcommandbuffer.h"
+#include "../vulkaninterop.h"
 
 #include <Tempest/Attachment>
 
@@ -161,6 +164,8 @@ VCommandBuffer::VCommandBuffer(VDevice& device, VkCommandPoolCreateFlags flags)
   }
 
 VCommandBuffer::~VCommandBuffer() {
+  if(profPool!=VK_NULL_HANDLE)
+    vkDestroyQueryPool(device.device.impl,profPool,nullptr);
   if(impl!=nullptr) {
     vkFreeCommandBuffers(device.device.impl,pool.impl,1,&impl);
     }
@@ -202,6 +207,99 @@ void VCommandBuffer::reset() {
   pushDescriptors.reset();
   }
 
+namespace {
+struct GpuProfile {
+  std::mutex                                       sync;
+  bool                                             enabled = false;
+  std::vector<std::pair<std::string,double>>       totals;   // name, ms
+  uint64_t                                         buffers = 0;
+  };
+GpuProfile& gpuProfile() {
+  static GpuProfile p;
+  return p;
+  }
+constexpr uint32_t MaxProfQueries = 256;
+}
+
+void Tempest::vulkanSetGpuProfiling(bool enabled) {
+  gpuProfile().enabled = enabled;
+  }
+
+bool Tempest::vulkanGpuProfiling() {
+  return gpuProfile().enabled;
+  }
+
+std::string Tempest::vulkanGpuProfileReport() {
+  auto& p = gpuProfile();
+  std::lock_guard<std::mutex> guard(p.sync);
+  if(p.buffers==0)
+    return "";
+  auto sorted = p.totals;
+  std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b){ return a.second>b.second; });
+  double sum = 0;
+  for(auto& i:sorted)
+    sum += i.second;
+  char buf[96];
+  std::snprintf(buf, sizeof(buf), "GPU ms per view %.2f:", sum/double(p.buffers));
+  std::string ret = buf;
+  for(auto& i:sorted) {
+    if(i.second/double(p.buffers)<0.05)
+      continue;
+    std::snprintf(buf, sizeof(buf), " %s %.2f;", i.first.c_str(), i.second/double(p.buffers));
+    ret += buf;
+    }
+  p.totals.clear();
+  p.buffers = 0;
+  return ret;
+  }
+
+void VCommandBuffer::profMark(std::string_view name) {
+  if(profPool==VK_NULL_HANDLE || profCount>=MaxProfQueries || impl==nullptr)
+    return;
+  if(state==RenderPass) {
+    // Tilers execute a pass when it ends: stamp the region at the pass boundary instead
+    profPending = name.empty() ? "untagged" : std::string(name);
+    profHasPending = true;
+    return;
+    }
+  vkCmdWriteTimestamp(impl, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, profPool, profCount);
+  profNames.emplace_back(name.empty() ? "untagged" : name);
+  ++profCount;
+  }
+
+void VCommandBuffer::profCollect() {
+  if(profPool==VK_NULL_HANDLE || profCount<2) {
+    profCount = 0;
+    profNames.clear();
+    return;
+    }
+  std::vector<uint64_t> ts(profCount);
+  const VkResult r = vkGetQueryPoolResults(device.device.impl, profPool, 0, profCount, ts.size()*sizeof(uint64_t),
+                                           ts.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
+  if(r==VK_SUCCESS) {
+    VkPhysicalDeviceProperties props = {};
+    vkGetPhysicalDeviceProperties(device.physicalDevice, &props);
+    const double toMs = double(props.limits.timestampPeriod)/1e6;
+    auto& p = gpuProfile();
+    std::lock_guard<std::mutex> guard(p.sync);
+    for(uint32_t i=0; i+1<profCount; ++i) {
+      const double ms = double(ts[i+1]-ts[i])*toMs;
+      bool found = false;
+      for(auto& t:p.totals)
+        if(t.first==profNames[i]) {
+          t.second += ms;
+          found = true;
+          break;
+          }
+      if(!found)
+        p.totals.emplace_back(profNames[i], ms);
+      }
+    p.buffers++;
+    }
+  profCount = 0;
+  profNames.clear();
+  }
+
 void VCommandBuffer::begin(SyncHint hint) {
   state  = Idle;
   curVbo = VK_NULL_HANDLE;
@@ -222,6 +320,19 @@ void VCommandBuffer::begin(SyncHint hint) {
     beginInfo.pInheritanceInfo = nullptr;
     vkAssert(vkBeginCommandBuffer(impl,&beginInfo));
     }
+
+  // The previous recording has completed when a command buffer is reused
+  profCollect();
+  if(gpuProfile().enabled) {
+    if(profPool==VK_NULL_HANDLE) {
+      VkQueryPoolCreateInfo qi = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+      qi.queryType  = VK_QUERY_TYPE_TIMESTAMP;
+      qi.queryCount = MaxProfQueries;
+      vkCreateQueryPool(device.device.impl, &qi, nullptr, &profPool);
+      }
+    vkCmdResetQueryPool(impl, profPool, 0, MaxProfQueries);
+    profMark("start");
+    }
   }
 
 void VCommandBuffer::begin() {
@@ -229,6 +340,8 @@ void VCommandBuffer::begin() {
   }
 
 void VCommandBuffer::end() {
+  if(profPool!=VK_NULL_HANDLE && profCount>0)
+    profMark("end");
   if(isDbgRegion) {
     device.vkCmdDebugMarkerEnd(impl);
     isDbgRegion = false;
@@ -350,6 +463,10 @@ void VCommandBuffer::endRendering() {
   resState.endRendering(*this);
 
   state = PostRenderPass;
+  if(profHasPending) {
+    profHasPending = false;
+    profMark(profPending);
+    }
   }
 
 void VCommandBuffer::setPipeline(AbstractGraphicsApi::Pipeline& p) {
@@ -722,6 +839,8 @@ void VCommandBuffer::setScissor(const Rect& r) {
   }
 
 void VCommandBuffer::setDebugMarker(std::string_view tag) {
+  if(profCount>0)
+    profMark(tag);
   if(isDbgRegion) {
     device.vkCmdDebugMarkerEnd(impl);
     isDbgRegion = false;

@@ -4,6 +4,7 @@
 
 #include <cstdint>
 #include <mutex>
+#include <string>
 
 namespace Tempest {
 
@@ -40,6 +41,12 @@ struct VulkanNativeImage {
   };
 
 VulkanNativeContext vulkanNativeContext(Device& device);
+
+// GPU time per debug-marker region, measured with timestamp queries while enabled.
+// The report lists average milliseconds per command buffer since the previous report.
+void        vulkanSetGpuProfiling(bool enabled);
+bool        vulkanGpuProfiling();
+std::string vulkanGpuProfileReport();
 VulkanNativeImage   vulkanNativeImage(const Attachment& image);
 
 }
