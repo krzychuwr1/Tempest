@@ -21,6 +21,9 @@ class VTexture : public AbstractGraphicsApi::Texture {
   public:
     VTexture()=default;
     VTexture(VTexture &&other);
+    // Colour image owned elsewhere (an OpenXR swapchain image): never freed here, rests in
+    // COLOR_ATTACHMENT_OPTIMAL, viewed as viewFormat
+    VTexture(VDevice& device, VkImage borrowed, VkFormat viewFormat);
     ~VTexture();
 
     VTexture& operator=(const VTexture& other)=delete;
@@ -47,6 +50,7 @@ class VTexture : public AbstractGraphicsApi::Texture {
     bool                   isStorageImage = false;
     bool                   is3D           = false;
     bool                   isFilterable   = false;
+    bool                   borrowed       = false;
 
   protected:
     void createViews (VkDevice device);

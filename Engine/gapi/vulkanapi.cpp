@@ -301,6 +301,15 @@ struct Tempest::Detail::VulkanInteropAccess {
     return {d->instance, d->physicalDevice, d->device.impl, d->graphicsQueue->impl,
             d->graphicsQueue->family, &d->graphicsQueue->sync};
     }
+  static Attachment borrow(Tempest::Device& source, VkImage image, uint32_t w, uint32_t h) {
+    auto* d = dynamic_cast<VDevice*>(source.dev);
+    if(d==nullptr || image==VK_NULL_HANDLE)
+      throw std::system_error(Tempest::GraphicsErrc::NoDevice);
+    VTexture tex(*d, image, VK_FORMAT_R8G8B8A8_UNORM);
+    AbstractGraphicsApi::PTexture impl(new VTextureWithFbo(std::move(tex)));
+    return Attachment(Texture2d(std::move(impl), w, h, 1, TextureFormat::RGBA8));
+    }
+
   static VulkanNativeImage image(const Tempest::Attachment& source) {
     auto& tex = textureCast<const Texture2d&>(source);
     auto* img = dynamic_cast<VTexture*>(tex.impl.handler);
@@ -316,6 +325,10 @@ VulkanNativeContext Tempest::vulkanNativeContext(Tempest::Device& device) {
 
 VulkanNativeImage Tempest::vulkanNativeImage(const Tempest::Attachment& image) {
   return Detail::VulkanInteropAccess::image(image);
+  }
+
+Attachment Tempest::vulkanBorrowColorAttachment(Device& device, VkImage image, uint32_t width, uint32_t height) {
+  return Detail::VulkanInteropAccess::borrow(device, image, width, height);
   }
 
 AbstractGraphicsApi::Swapchain *VulkanApi::createSwapchain(SystemApi::Window *w, AbstractGraphicsApi::Device *d) {

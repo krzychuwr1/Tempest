@@ -5,6 +5,8 @@
 #include <Tempest/Pixmap>
 #include "vdevice.h"
 
+#include <atomic>
+
 using namespace Tempest;
 using namespace Tempest::Detail;
 
@@ -19,14 +21,28 @@ VTexture::VTexture(VTexture&& other) {
   std::swap(isStorageImage, other.isStorageImage);
   std::swap(is3D,           other.is3D);
   std::swap(isFilterable,   other.isFilterable);
+  std::swap(borrowed,       other.borrowed);
   std::swap(extViews,       other.extViews);
   std::swap(extDescr,       other.extDescr);
+  }
+
+static NonUniqResId borrowedSyncId() {
+  // Same scheme as VAllocator: one of 32 hazard-tracking bits
+  static std::atomic_uint32_t i = {};
+  return NonUniqResId(1u << (i.fetch_add(1) % 32));
+  }
+
+VTexture::VTexture(VDevice& device, VkImage image, VkFormat viewFormat)
+  :impl(image), format(viewFormat), nonUniqId(borrowedSyncId()), alloc(&device.allocator), borrowed(true) {
+  createViews(device.device.impl);
   }
 
 VTexture::~VTexture() {
   if(alloc!=nullptr) {
     alloc->device()->descPool.notifyDestroy(this);
-    alloc->free(*this);
+    if(borrowed)
+      destroyViews(alloc->device()->device.impl); else
+      alloc->free(*this);
     }
   }
 
@@ -167,6 +183,8 @@ VkImageViewCreateInfo VTexture::createInfo(const ComponentMapping* cmap, uint32_
   }
 
 VkImageLayout VTexture::defaultLayout() const {
+  if(borrowed)
+    return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   if(nativeIsDepthFormat(format))
     return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
   if(isStorageImage)

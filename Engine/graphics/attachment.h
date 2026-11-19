@@ -35,6 +35,7 @@ class Attachment final {
 
   friend class Tempest::Device;
   friend class Tempest::Swapchain;
+  friend struct Tempest::Detail::VulkanInteropAccess;
   friend class Encoder<Tempest::CommandBuffer>;
 
   template<class T> friend T textureCast(Attachment& a);

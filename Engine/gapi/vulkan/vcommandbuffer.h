@@ -162,8 +162,8 @@ class VCommandBuffer:public AbstractGraphicsApi::CommandBuffer {
     VkQueryPool                             profPool  = VK_NULL_HANDLE;
     uint32_t                                profCount = 0;
     std::vector<std::string>                profNames;
-    std::string                             profPending;
-    bool                                    profHasPending = false;
+    std::string                             profPassNames, profCandidate;
+    bool                                    profHasCandidate = false;
     void                                    profMark(std::string_view name);
     void                                    profCollect();
   };

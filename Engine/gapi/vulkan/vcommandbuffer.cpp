@@ -243,7 +243,7 @@ std::string Tempest::vulkanGpuProfileReport() {
   std::snprintf(buf, sizeof(buf), "GPU ms per view %.2f:", sum/double(p.buffers));
   std::string ret = buf;
   for(auto& i:sorted) {
-    if(i.second/double(p.buffers)<0.05)
+    if(i.second/double(p.buffers)<0.02)
       continue;
     std::snprintf(buf, sizeof(buf), " %s %.2f;", i.first.c_str(), i.second/double(p.buffers));
     ret += buf;
@@ -257,9 +257,10 @@ void VCommandBuffer::profMark(std::string_view name) {
   if(profPool==VK_NULL_HANDLE || profCount>=MaxProfQueries || impl==nullptr)
     return;
   if(state==RenderPass) {
-    // Tilers execute a pass when it ends: stamp the region at the pass boundary instead
-    profPending = name.empty() ? "untagged" : std::string(name);
-    profHasPending = true;
+    // Tilers execute a pass as a whole, so each pass is one region. A marker inside it names the
+    // pass once draws follow it; a trailing marker (set just before the next pass) names what follows.
+    profCandidate    = name.empty() ? "untagged" : std::string(name);
+    profHasCandidate = true;
     return;
     }
   vkCmdWriteTimestamp(impl, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, profPool, profCount);
@@ -446,6 +447,13 @@ void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, 
       att.storeOp            = mkStoreOp(fbo.desc[i].store);
       }
     passDyn.colorAttachmentCount = info.colorAttachmentCount;
+    if(profCount>0) {
+      // Pass region, named "<previous marker> pass" unless markers inside it name it
+      std::string label = profNames.empty() ? std::string("pass") : profNames.back() + " pass";
+      profMark(label);
+      profPassNames.clear();
+      profHasCandidate = false;
+      }
     vkCmdBeginRenderingKHR(impl,&info);
   }
   state = RenderPass;
@@ -463,13 +471,22 @@ void VCommandBuffer::endRendering() {
   resState.endRendering(*this);
 
   state = PostRenderPass;
-  if(profHasPending) {
-    profHasPending = false;
-    profMark(profPending);
+  if(profCount>0) {
+    if(!profPassNames.empty())
+      profNames.back() = profPassNames;
+    profPassNames.clear();
+    profMark(profHasCandidate ? profCandidate : std::string("between passes"));
+    profHasCandidate = false;
     }
   }
 
 void VCommandBuffer::setPipeline(AbstractGraphicsApi::Pipeline& p) {
+  if(profHasCandidate && state==RenderPass) {
+    if(!profPassNames.empty())
+      profPassNames += "+";
+    profPassNames   += profCandidate;
+    profHasCandidate = false;
+    }
   VPipeline& px   = reinterpret_cast<VPipeline&>(p);
 
   if(device.props.hasDescriptorHeap) {

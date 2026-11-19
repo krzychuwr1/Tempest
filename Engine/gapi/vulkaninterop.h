@@ -48,5 +48,8 @@ void        vulkanSetGpuProfiling(bool enabled);
 bool        vulkanGpuProfiling();
 std::string vulkanGpuProfileReport();
 VulkanNativeImage   vulkanNativeImage(const Attachment& image);
+// Render target over an external RGBA8-compatible colour image (created with a mutable format,
+// such as an sRGB OpenXR swapchain image), viewed as R8G8B8A8_UNORM so values are written as they are
+Attachment          vulkanBorrowColorAttachment(Device& device, VkImage image, uint32_t width, uint32_t height);
 
 }
