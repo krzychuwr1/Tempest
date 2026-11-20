@@ -22,9 +22,11 @@
 #include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
+#include <deque>
 #include <exception>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 using namespace Tempest;
@@ -59,6 +61,21 @@ static AndroidApi::GamepadState gamepadKeys;
 // Contributions from the last game poll that may still generate ordinary key releases.
 static AndroidApi::GamepadState releaseAxes, releaseKeys;
 static bool                     padInterrupted = false;
+
+struct PhysicalKey {
+  KeyEvent event;
+  uint32_t scan;
+  uint64_t source;
+  bool     repeat;
+  };
+
+using PhysicalInput = std::variant<PhysicalKey,MouseEvent,AndroidApi::GamepadSample>;
+static std::deque<PhysicalInput> pendingInput;
+static bool                      frameInput = false;
+static uint64_t                  inputDispatch = 0;
+static AndroidApi::GamepadState  deliveredPad;
+static bool                      inputFocusLost = false;
+static void queuePadSample();
 // Android can expose separate input device IDs for buttons and axes.
 static int32_t                  axisDevice = -1, keyDevice = -1;
 static std::chrono::steady_clock::time_point nextPadCheck;
@@ -244,6 +261,10 @@ bool AndroidApi::activityResumed() {
   return resumed;
   }
 
+bool AndroidApi::activityFocused() {
+  return resumed && focused;
+  }
+
 void AndroidApi::setExternalInputFocus(bool hasFocus) {
   if(externalInputFocus==hasFocus)
     return;
@@ -260,8 +281,10 @@ static void cancelPadSource(AndroidApi::GamepadState& state, AndroidApi::Gamepad
 static void selectPad(int32_t& current, AndroidApi::GamepadState& state, AndroidApi::GamepadState& releases, const AInputEvent* event) {
   const int32_t id = AInputEvent_getDeviceId(event);
   if(current!=id) {
-    if(state.connected)
+    if(state.connected) {
       cancelPadSource(state,releases);
+      queuePadSample();
+      }
     current = id;
     }
   state.connected = true;
@@ -298,7 +321,8 @@ static void checkPadDevices() {
     };
   const bool axisGone = gamepadState.connected && removed(axisDevice);
   const bool sharedDevice = gamepadState.connected && keyDevice==axisDevice;
-  if(gamepadKeys.connected && (sharedDevice ? axisGone : removed(keyDevice)))
+  const bool keysGone = gamepadKeys.connected && (sharedDevice ? axisGone : removed(keyDevice));
+  if(keysGone)
     cancelPadSource(gamepadKeys,releaseKeys);
   if(axisGone)
     cancelPadSource(gamepadState,releaseAxes);
@@ -307,6 +331,8 @@ static void checkPadDevices() {
   env->DeleteLocalRef(cls);
   if(attach)
     vm->DetachCurrentThread();
+  if(keysGone || axisGone)
+    queuePadSample();
   }
 
 static AndroidApi::GamepadState mergePad(AndroidApi::GamepadState axes, const AndroidApi::GamepadState& keys) {
@@ -323,12 +349,63 @@ AndroidApi::GamepadState AndroidApi::gamepad() {
   return mergePad(gamepadState,gamepadKeys);
   }
 
-AndroidApi::GamepadSample AndroidApi::pollGamepad() {
-  auto state = gamepad();
-  GamepadSample sample{state,mergePad(releaseAxes,releaseKeys),std::exchange(padInterrupted,false)};
+static AndroidApi::GamepadSample takePadSample() {
+  AndroidApi::GamepadSample sample{mergePad(gamepadState,gamepadKeys),mergePad(releaseAxes,releaseKeys),std::exchange(padInterrupted,false)};
   releaseAxes = gamepadState;
   releaseKeys = gamepadKeys;
   return sample;
+  }
+
+static void queuePadSample() {
+  if(!frameInput)
+    return;
+  auto sample = takePadSample();
+  if(sample.interrupted || sample.state!=sample.releaseSources)
+    pendingInput.emplace_back(sample);
+  }
+
+AndroidApi::GamepadSample AndroidApi::pollGamepad() {
+  checkPadDevices();
+  return takePadSample();
+  }
+
+void AndroidApi::setFrameInput(bool enabled) {
+  pendingInput.clear();
+  ++inputDispatch;
+  frameInput = enabled;
+  deliveredPad = takePadSample().state;
+  }
+
+void AndroidApi::endInputDispatch() {
+  ++inputDispatch;
+  }
+
+bool AndroidApi::takeInputFocusLoss() {
+  return std::exchange(inputFocusLost,false);
+  }
+
+bool AndroidApi::dispatchFrameInput(const std::function<void(const GamepadSample&)>& onPad) {
+  if(!active)
+    return false;
+  const auto dispatch = ++inputDispatch;
+  checkPadDevices();
+  // XR was sampled before the new native events. Establish shared key ownership first.
+  onPad(GamepadSample{deliveredPad,deliveredPad,false});
+  while(dispatch==inputDispatch && !pendingInput.empty()) {
+    // A widget may run a modal event loop. The nested call must see the next event.
+    auto item = std::move(pendingInput.front());
+    pendingInput.pop_front();
+    if(auto* key = std::get_if<PhysicalKey>(&item)) {
+      dispatchPhysicalKey(key->event,key->scan,key->source,key->repeat);
+      } else if(auto* mouse = std::get_if<MouseEvent>(&item)) {
+      dispatchPointer(*mouse);
+      } else {
+      const auto& sample = std::get<GamepadSample>(item);
+      deliveredPad = sample.state;
+      onPad(sample);
+      }
+    }
+  return dispatch==inputDispatch;
   }
 
 void AndroidApi::dispatchInputKey(Tempest::Window& window, KeyEvent& event, uint64_t source, bool repeat) {
@@ -354,9 +431,11 @@ void AndroidApi::dispatchInputKey(Tempest::Window& window, KeyEvent& event, uint
     }
   }
 
-void AndroidApi::dispatchGamepadKey(Tempest::Window& window, KeyEvent& event) {
+bool AndroidApi::dispatchGamepadKey(Tempest::Window& window, KeyEvent& event) {
   // Physical scans use their device ID and a real scan or a tagged keycode.
+  const auto dispatch = inputDispatch;
   dispatchInputKey(window,event,UINT64_MAX,false);
+  return dispatch==inputDispatch;
   }
 
 void AndroidApi::setPointerCapture(bool capture) {
@@ -398,6 +477,10 @@ void AndroidApi::updateFocus(bool cancel) {
     return;
   active = next;
   if(!active) {
+    ++inputDispatch;
+    inputFocusLost = true;
+    deliveredPad = {};
+    pendingInput.clear();
     heldKeys.clear();
     cancelPadSource(gamepadState,releaseAxes);
     cancelPadSource(gamepadKeys,releaseKeys);
@@ -501,6 +584,7 @@ bool AndroidApi::processKeyEvent(const void* input) {
         }
       trigger = down ? 1.f : 0.f;
       }
+    queuePadSample();
     return true;
     }
   if(code==AKEYCODE_BACK || code==AKEYCODE_VOLUME_UP || code==AKEYCODE_VOLUME_DOWN)
@@ -519,16 +603,41 @@ bool AndroidApi::processKeyEvent(const void* input) {
   uint32_t scan = uint32_t(AKeyEvent_getScanCode(event));
   if(scan==0)
     scan = 0x40000000u | uint32_t(code);
-  if(kt==Event::K_NoKey) {
-    // Character-only keys have no logical identity to share with a gamepad.
-    if(down)
-      dispatchKeyDown(*mainWindow,e,scan); else
-      dispatchKeyUp(*mainWindow,e,scan);
-    } else {
-    const uint64_t source = (uint64_t(uint32_t(AInputEvent_getDeviceId(event)))<<32) | scan;
-    dispatchInputKey(*mainWindow,e,source,AKeyEvent_getRepeatCount(event)>0);
-    }
+  const uint64_t source = (uint64_t(uint32_t(AInputEvent_getDeviceId(event)))<<32) | scan;
+  const bool repeat = AKeyEvent_getRepeatCount(event)>0;
+  if(frameInput)
+    pendingInput.emplace_back(PhysicalKey{e,scan,source,repeat});
+  else
+    dispatchPhysicalKey(e,scan,source,repeat);
   return true;
+  }
+
+void AndroidApi::dispatchPhysicalKey(KeyEvent& e, uint32_t scan, uint64_t source, bool repeat) {
+  if(e.key!=Event::K_NoKey) {
+    dispatchInputKey(*mainWindow,e,source,repeat);
+    return;
+    }
+  // Character-only keys have no logical identity to share with a gamepad.
+  if(e.type()==Event::KeyDown)
+    dispatchKeyDown(*mainWindow,e,scan); else
+    dispatchKeyUp(*mainWindow,e,scan);
+  }
+
+void AndroidApi::dispatchPointer(MouseEvent& e) {
+  switch(e.type()) {
+    case Event::MouseDown:  dispatchMouseDown (*mainWindow,e); break;
+    case Event::MouseUp:    dispatchMouseUp   (*mainWindow,e); break;
+    case Event::MouseWheel: dispatchMouseWheel(*mainWindow,e); break;
+    case Event::MouseMove:  dispatchMouseMove (*mainWindow,e); break;
+    default: break;
+    }
+  }
+
+void AndroidApi::sendPointer(MouseEvent& e) {
+  if(frameInput)
+    pendingInput.emplace_back(e);
+  else
+    dispatchPointer(e);
   }
 
 bool AndroidApi::processMouseEvent(const void* input) {
@@ -578,9 +687,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
         if(was==is)
           continue;
         MouseEvent e(center.x, center.y, m.b, Event::M_NoModifier, 0, 0, is ? Event::MouseDown : Event::MouseUp);
-        if(is)
-          SystemApi::dispatchMouseDown(*mainWindow,e); else
-          SystemApi::dispatchMouseUp  (*mainWindow,e);
+        sendPointer(e);
         }
       mousePressed = now;
       return true;
@@ -588,7 +695,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
     case AMOTION_EVENT_ACTION_SCROLL: {
       const float v = AMotionEvent_getAxisValue(event,AMOTION_EVENT_AXIS_VSCROLL,0);
       MouseEvent e(center.x, center.y, Event::ButtonNone, Event::M_NoModifier, int(v*120.f), 0, Event::MouseWheel);
-      SystemApi::dispatchMouseWheel(*mainWindow,e);
+      sendPointer(e);
       return true;
       }
     case AMOTION_EVENT_ACTION_HOVER_MOVE:
@@ -596,7 +703,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
       if(dx==0 && dy==0)
         return true;
       MouseEvent e(at.x, at.y, Event::ButtonNone, Event::M_NoModifier, 0, 0, Event::MouseMove);
-      SystemApi::dispatchMouseMove(*mainWindow,e);
+      sendPointer(e);
       return true;
       }
     }
@@ -604,7 +711,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
   }
 
 int32_t AndroidApi::onInputEvent(const void* input) {
-  if(externalPresentation && !externalInputFocus)
+  if(!active)
     return 0;
   const auto    event  = static_cast<const AInputEvent*>(input);
   const int32_t source = AInputEvent_getSource(event);
@@ -613,8 +720,10 @@ int32_t AndroidApi::onInputEvent(const void* input) {
   if(AInputEvent_getType(event)==AINPUT_EVENT_TYPE_MOTION && isGamepadSource(source)) {
     auto axis = [event](int32_t a) { return AMotionEvent_getAxisValue(event,a,0); };
     if((AMotionEvent_getAction(event) & AMOTION_EVENT_ACTION_MASK)==AMOTION_EVENT_ACTION_CANCEL) {
-      if(axisDevice==AInputEvent_getDeviceId(event) && gamepadState.connected)
+      if(axisDevice==AInputEvent_getDeviceId(event) && gamepadState.connected) {
         cancelPadSource(gamepadState,releaseAxes);
+        queuePadSample();
+        }
       return 1;
       }
     selectPad(axisDevice,gamepadState,releaseAxes,event);
@@ -630,6 +739,7 @@ int32_t AndroidApi::onInputEvent(const void* input) {
     gamepadState.buttons[GamepadState::DpadRight] = hx> 0.5f;
     gamepadState.buttons[GamepadState::DpadUp]    = hy<-0.5f;
     gamepadState.buttons[GamepadState::DpadDown]  = hy> 0.5f;
+    queuePadSample();
     return 1;
     }
   if(AInputEvent_getType(event)==AINPUT_EVENT_TYPE_MOTION &&
@@ -734,6 +844,7 @@ SystemApi::Window* AndroidApi::implCreateWindow(Tempest::Window* owner, ShowMode
   }
 
 void AndroidApi::implDestroyWindow(SystemApi::Window*) {
+  setFrameInput(false);
   heldKeys.clear();
   cancelPadSource(gamepadState,releaseAxes);
   cancelPadSource(gamepadKeys,releaseKeys);
@@ -822,7 +933,8 @@ void AndroidApi::implProcessEvents(AppCallBack& cb) {
   if(ALooper_pollOnce(timeoutMs,nullptr,&pending,reinterpret_cast<void**>(&source))>=0) {
     if (source != nullptr)
       source->process(app, source);
-    return;
+    if(!frameInput || source==nullptr || source->id!=LOOPER_ID_INPUT || pendingInput.empty())
+      return;
     }
 
   if((!visible && !externalPresentation) || isExit.load())

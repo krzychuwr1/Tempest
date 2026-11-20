@@ -69,6 +69,10 @@ void SystemApi::addOverlay(UiOverlay* ui) {
 
 void SystemApi::takeOverlay(UiOverlay* ui) {
   dispatcher.takeOverlay(ui);
+#ifdef __ANDROID__
+  // Let a synchronous dialog return before delivering input to its parent.
+  AndroidApi::endInputDispatch();
+#endif
   }
 
 uint16_t SystemApi::translateKey(uint64_t scancode) {

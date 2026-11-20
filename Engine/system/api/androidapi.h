@@ -2,6 +2,7 @@
 
 #include <Tempest/SystemApi>
 #include <filesystem>
+#include <functional>
 
 struct ANativeWindow;
 struct ANativeActivity;
@@ -18,6 +19,7 @@ class AndroidApi final : SystemApi {
       bool  connected = false;
       float lx = 0, ly = 0, rx = 0, ry = 0, lt = 0, rt = 0;
       bool  buttons[Count] = {};
+      bool  operator==(const GamepadState&) const = default;
       };
 
     struct GamepadSample {
@@ -37,13 +39,18 @@ class AndroidApi final : SystemApi {
     static void                  setExternalPresentation(int width, int height, float uiScale);
     static bool                  hasExternalPresentation();
     static bool                  activityResumed();
+    static bool                  activityFocused();
     static void                  setExternalInputFocus(bool hasFocus);
 
     // Latest state of a Bluetooth/USB gamepad; its buttons never reach the window as key events.
     static GamepadState          gamepad();
     static GamepadSample         pollGamepad();
+    // Queue external inputs in native order for a game that polls once per frame.
+    static void                  setFrameInput(bool enabled);
+    static bool                  takeInputFocusLoss();
+    static bool                  dispatchFrameInput(const std::function<void(const GamepadSample&)>& onPad);
     // Deliver a mapped gamepad key to the focused widget, including modal overlays.
-    static void                  dispatchGamepadKey(Tempest::Window& window, KeyEvent& event);
+    static bool                  dispatchGamepadKey(Tempest::Window& window, KeyEvent& event);
 
     // Pointer capture delivers relative mouse motion.
     static void                  setPointerCapture(bool capture);
@@ -57,6 +64,10 @@ class AndroidApi final : SystemApi {
     static bool processTouchEvents(AppCallBack& cb);
     static bool processKeyEvent(const void* event);
     static void dispatchInputKey(Tempest::Window& window, KeyEvent& event, uint64_t source, bool repeat);
+    static void dispatchPhysicalKey(KeyEvent& event, uint32_t scan, uint64_t source, bool repeat);
+    static void dispatchPointer(MouseEvent& event);
+    static void sendPointer(MouseEvent& event);
+    static void endInputDispatch();
     static bool processMouseEvent(const void* event);
     static Rect implClientRectOf();
     static void updateFocus(bool cancel = false);
