@@ -142,9 +142,11 @@ void UploadEngine<Device,CommandBuffer,Buffer>::wait() {
 
 template<class Device, class CommandBuffer, class Buffer>
 void UploadEngine<Device,CommandBuffer,Buffer>::submit(std::unique_ptr<Commands>&& cmd) {
-  cmd->setFence(device.submit(*cmd));
-
   std::lock_guard<SpinLock> guard(sync);
+  // Reserve ownership before submitting: the GPU may still use this command pool
+  // if growing the recycling vector fails.
+  this->cmd.reserve(this->cmd.size()+1);
+  cmd->setFence(device.submit(*cmd));
   this->cmd.push_back(std::move(cmd));
   }
 
