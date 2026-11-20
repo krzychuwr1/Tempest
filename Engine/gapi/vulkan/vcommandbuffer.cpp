@@ -162,27 +162,12 @@ VCommandBuffer::VCommandBuffer(VDevice& device, VkCommandPoolCreateFlags flags)
 VCommandBuffer::~VCommandBuffer() {
   if(profPool!=VK_NULL_HANDLE)
     vkDestroyQueryPool(device.device.impl,profPool,nullptr);
-  if(impl!=nullptr) {
-    vkFreeCommandBuffers(device.device.impl,pool.impl,1,&impl);
-    }
-
-  if(chunks.size()==0)
-    return;
-
-  SmallArray<VkCommandBuffer,MaxCmdChunks> flat(chunks.size());
-  auto node = chunks.begin();
-  for(size_t i=0; i<chunks.size(); ++i) {
-    flat[i] = node->val[i%chunks.chunkSize].impl;
-    if((i+1)%chunks.chunkSize==0)
-      node = node->next;
-    }
-  vkFreeCommandBuffers(device.device.impl,pool.impl,uint32_t(chunks.size()),flat.get());
+  // Destroying this buffer's command pool releases all of its native command buffers.
   }
 
 void VCommandBuffer::reset() {
   vkAssert(vkResetCommandPool(device.device.impl,pool.impl,0));
 
-  SmallArray<VkCommandBuffer,MaxCmdChunks> flat(chunks.size());
   auto node = chunks.begin();
   if(chunks.size()>0) {
     impl = node->val[0].impl;
