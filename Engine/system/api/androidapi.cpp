@@ -52,6 +52,7 @@ static int              externalH            = 0;
 static float            externalUiScale      = 1.f;
 
 static AndroidApi::GamepadState gamepadState;
+static AndroidApi::GamepadState gamepadKeys;
 static Point                    mouseLast;
 static bool                     mouseValid = false;
 static int32_t                  mousePressed = 0;
@@ -143,11 +144,13 @@ static Event::KeyType androidKey(int32_t code) {
   }
 
 static uint32_t translateChar(int32_t code, int32_t meta) {
-  const bool shift = (meta & (AMETA_SHIFT_ON|AMETA_CAPS_LOCK_ON))!=0;
-  if(code>=AKEYCODE_A && code<=AKEYCODE_Z)
-    return uint32_t((shift ? 'A' : 'a') + (code-AKEYCODE_A));
-  if(code>=AKEYCODE_0 && code<=AKEYCODE_9 && !shift)
-    return uint32_t('0' + (code-AKEYCODE_0));
+  const bool shift = (meta & AMETA_SHIFT_ON)!=0;
+  if(code>=AKEYCODE_A && code<=AKEYCODE_Z) {
+    const bool upper = shift != ((meta & AMETA_CAPS_LOCK_ON)!=0);
+    return uint32_t((upper ? 'A' : 'a') + (code-AKEYCODE_A));
+    }
+  if(code>=AKEYCODE_0 && code<=AKEYCODE_9)
+    return uint32_t((shift ? ")!@#$%^&*(" : "0123456789")[code-AKEYCODE_0]);
   switch(code) {
     case AKEYCODE_SPACE:  return ' ';
     case AKEYCODE_MINUS:  return shift ? '_' : '-';
@@ -165,7 +168,7 @@ static Event::Modifier translateModifiers(int32_t meta) {
   return Event::Modifier(m);
   }
 
-static int gamepadButton(int32_t code) {
+static int gamepadButton(int32_t code, bool padSource) {
   using B = AndroidApi::GamepadState;
   switch(code) {
     case AKEYCODE_BUTTON_A:      return B::A;
@@ -179,6 +182,10 @@ static int gamepadButton(int32_t code) {
     case AKEYCODE_BUTTON_START:  return B::Start;
     case AKEYCODE_BUTTON_SELECT: return B::Back;
     case AKEYCODE_BUTTON_MODE:   return B::Back;
+    case AKEYCODE_DPAD_UP:       return padSource ? B::DpadUp : -1;
+    case AKEYCODE_DPAD_DOWN:     return padSource ? B::DpadDown : -1;
+    case AKEYCODE_DPAD_LEFT:     return padSource ? B::DpadLeft : -1;
+    case AKEYCODE_DPAD_RIGHT:    return padSource ? B::DpadRight : -1;
     }
   return -1;
   }
@@ -219,7 +226,21 @@ bool AndroidApi::hasExternalPresentation() {
   }
 
 AndroidApi::GamepadState AndroidApi::gamepad() {
-  return gamepadState;
+  auto state = gamepadState;
+  state.connected |= gamepadKeys.connected;
+  state.lt = std::max(state.lt, gamepadKeys.lt);
+  state.rt = std::max(state.rt, gamepadKeys.rt);
+  for(int i=0; i<GamepadState::Count; ++i)
+    state.buttons[i] |= gamepadKeys.buttons[i];
+  return state;
+  }
+
+void AndroidApi::dispatchGamepadKey(Tempest::Window& window, KeyEvent& event) {
+  const uint32_t scan = 0x80000000u | uint32_t(event.key);
+  if(event.type()==Event::KeyDown)
+    dispatchKeyDown(window,event,scan);
+  else
+    dispatchKeyUp(window,event,scan);
   }
 
 void AndroidApi::setPointerCapture(bool capture) {
@@ -262,6 +283,7 @@ void AndroidApi::updateFocus() {
   active = next;
   if(!active) {
     gamepadState = {};
+    gamepadKeys = {};
     mouseValid = false;
     mousePressed = 0;
     releaseAllTouches();
@@ -341,10 +363,16 @@ bool AndroidApi::processKeyEvent(const void* input) {
     return false;
   const bool down = action==AKEY_EVENT_ACTION_DOWN;
 
-  const int button = gamepadButton(code);
+  const int button = gamepadButton(code, isGamepadSource(AInputEvent_getSource(event)));
   if(button>=0) {
-    gamepadState.buttons[button] = down;
-    gamepadState.connected       = true;
+    gamepadKeys.buttons[button] = down;
+    gamepadKeys.connected       = true;
+    return true;
+    }
+  if(code==AKEYCODE_BUTTON_L2 || code==AKEYCODE_BUTTON_R2) {
+    auto& trigger = code==AKEYCODE_BUTTON_L2 ? gamepadKeys.lt : gamepadKeys.rt;
+    trigger = down ? 1.f : 0.f;
+    gamepadKeys.connected = true;
     return true;
     }
   if(code==AKEYCODE_BACK || code==AKEYCODE_VOLUME_UP || code==AKEYCODE_VOLUME_DOWN)
@@ -357,11 +385,11 @@ bool AndroidApi::processKeyEvent(const void* input) {
     return false;
   if(mainWindow==nullptr)
     return true;
-  if(down && AKeyEvent_getRepeatCount(event)>0 && kt!=Event::K_Back)
-    return true;
 
   KeyEvent e(kt, chr, translateModifiers(meta), down ? Event::KeyDown : Event::KeyUp);
-  const uint32_t scan = uint32_t(AKeyEvent_getScanCode(event));
+  uint32_t scan = uint32_t(AKeyEvent_getScanCode(event));
+  if(scan==0)
+    scan = 0x40000000u | uint32_t(code);
   if(down)
     SystemApi::dispatchKeyDown(*mainWindow,e,scan); else
     SystemApi::dispatchKeyUp  (*mainWindow,e,scan);

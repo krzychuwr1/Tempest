@@ -227,6 +227,16 @@ void EventDispatcher::dispatchClose(Widget& wnd, CloseEvent& e) {
   }
 
 void EventDispatcher::dispatchFocus(Widget& wnd, FocusEvent& e) {
+#if defined(__ANDROID__)
+  if(!e.in) {
+    // Android can deliver the matching up event to a different activity.
+    keyUp.clear();
+    keyMod = {};
+    mouseUp.clear();
+    mouseLast.reset();
+    mouseLastTime = 0;
+    }
+#endif
   if(e.in) {
     if(auto f = focusLast.lock()) {
       f->widget->setFocus(true);

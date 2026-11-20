@@ -33,6 +33,8 @@ class AndroidApi final : SystemApi {
 
     // Latest state of a Bluetooth/USB gamepad; its buttons never reach the window as key events.
     static GamepadState          gamepad();
+    // Deliver a mapped gamepad key to the focused widget, including modal overlays.
+    static void                  dispatchGamepadKey(Tempest::Window& window, KeyEvent& event);
 
     // Pointer capture delivers relative mouse motion.
     static void                  setPointerCapture(bool capture);
