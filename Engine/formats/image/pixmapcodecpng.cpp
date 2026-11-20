@@ -2,6 +2,7 @@
 
 #include <Tempest/IDevice>
 #include <Tempest/ODevice>
+#include <Tempest/Except>
 
 #include <png.h>
 #include <cstring>
@@ -111,12 +112,22 @@ struct PixmapCodecPng::Impl {
 
 static void png_write_data(png_structp png_ptr, png_bytep data, png_size_t length){
   ODevice* f = reinterpret_cast<ODevice*>(png_get_io_ptr(png_ptr));
-  f->write(data, length);
+  try {
+    if(f->write(data,length)==length)
+      return;
+    }
+  catch(...) {}
+  png_error(png_ptr,"unable to write output stream");
   }
 
 static void png_flush(png_structp png_ptr){
   ODevice* f = reinterpret_cast<ODevice*>(png_get_io_ptr(png_ptr));
-  f->flush();
+  try {
+    if(f->flush())
+      return;
+    }
+  catch(...) {}
+  png_error(png_ptr,"unable to flush output stream");
   }
 
 PixmapCodecPng::PixmapCodecPng() {
@@ -236,9 +247,8 @@ bool PixmapCodecPng::save(ODevice& f, const char* ext, const uint8_t* data,
     }
 
   if(setjmp(png_jmpbuf(png_ptr))) {
-    png_destroy_info_struct(png_ptr, &info_ptr);
-    png_destroy_write_struct(&png_ptr,nullptr);
-    return false;
+    png_destroy_write_struct(&png_ptr,&info_ptr);
+    throw std::system_error(SystemErrc::UnableToSaveAsset);
     }
 
   png_set_write_fn(png_ptr, &f, png_write_data, png_flush);
@@ -265,10 +275,10 @@ bool PixmapCodecPng::save(ODevice& f, const char* ext, const uint8_t* data,
       }
     }
   png_write_end(png_ptr, nullptr);
+  png_flush(png_ptr);
   }
 
   // cleanup
-  png_destroy_info_struct(png_ptr, &info_ptr);
-  png_destroy_write_struct(&png_ptr,nullptr);
+  png_destroy_write_struct(&png_ptr,&info_ptr);
   return true;
   }
