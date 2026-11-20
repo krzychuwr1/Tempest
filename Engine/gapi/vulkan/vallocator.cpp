@@ -424,7 +424,13 @@ void VAllocator::alignRange(VkMappedMemoryRange& rgn, size_t nonCoherentAtomSize
     rgn.size += nonCoherentAtomSize-rgn.size%nonCoherentAtomSize;
   }
 
-bool VAllocator::fill(VBuffer& dest, uint32_t mem, size_t offset, size_t size) {
+static void flushAndUnmap(VkDevice dev, const VkMappedMemoryRange& range) {
+  const VkResult result = vkFlushMappedMemoryRanges(dev,1,&range);
+  vkUnmapMemory(dev,range.memory);
+  vkAssert(result);
+  }
+
+void VAllocator::fill(VBuffer& dest, uint32_t mem, size_t offset, size_t size) {
   auto& page = dest.page;
   void* data = nullptr;
 
@@ -438,18 +444,15 @@ bool VAllocator::fill(VBuffer& dest, uint32_t mem, size_t offset, size_t size) {
   alignRange(rgn,provider.device->props.nonCoherentAtomSize,shift);
 
   std::lock_guard<std::mutex> g(page.page->mmapSync);
-  if(vkMapMemory(dev,page.page->memory,rgn.offset,rgn.size,0,&data)!=VK_SUCCESS)
-    return false;
+  vkAssert(vkMapMemory(dev,page.page->memory,rgn.offset,rgn.size,0,&data));
 
   data = reinterpret_cast<uint8_t*>(data) + shift;
   std::fill_n(reinterpret_cast<uint32_t*>(data), size/sizeof(uint32_t), mem);
 
-  vkFlushMappedMemoryRanges(dev,1,&rgn);
-  vkUnmapMemory(dev,page.page->memory);
-  return true;
+  flushAndUnmap(dev,rgn);
   }
 
-bool VAllocator::update(VBuffer &dest, const void *mem, size_t offset, size_t size) {
+void VAllocator::update(VBuffer &dest, const void *mem, size_t offset, size_t size) {
   auto& page = dest.page;
   void* data = nullptr;
 
@@ -463,18 +466,15 @@ bool VAllocator::update(VBuffer &dest, const void *mem, size_t offset, size_t si
   alignRange(rgn,provider.device->props.nonCoherentAtomSize,shift);
 
   std::lock_guard<std::mutex> g(page.page->mmapSync);
-  if(vkMapMemory(dev,page.page->memory,rgn.offset,rgn.size,0,&data)!=VK_SUCCESS)
-    return false;
+  vkAssert(vkMapMemory(dev,page.page->memory,rgn.offset,rgn.size,0,&data));
 
   data = reinterpret_cast<uint8_t*>(data) + shift;
   std::memcpy(data, mem, size);
 
-  vkFlushMappedMemoryRanges(dev,1,&rgn);
-  vkUnmapMemory(dev,page.page->memory);
-  return true;
+  flushAndUnmap(dev,rgn);
   }
 
-bool VAllocator::read(VBuffer &src, void *mem, size_t offset, size_t size) {
+void VAllocator::read(VBuffer &src, void *mem, size_t offset, size_t size) {
   auto& page = src.page;
   void* data = nullptr;
 
@@ -487,15 +487,12 @@ bool VAllocator::read(VBuffer &src, void *mem, size_t offset, size_t size) {
   alignRange(rgn,provider.device->props.nonCoherentAtomSize,shift);
 
   std::lock_guard<std::mutex> g(page.page->mmapSync);
-  if(vkMapMemory(dev,page.page->memory,rgn.offset,rgn.size,0,&data)!=VK_SUCCESS)
-    return false;
-  vkInvalidateMappedMemoryRanges(dev,1,&rgn);
-
-  data = reinterpret_cast<uint8_t*>(data)+shift;
-  std::memcpy(mem,data,size);
-
+  vkAssert(vkMapMemory(dev,page.page->memory,rgn.offset,rgn.size,0,&data));
+  const VkResult result = vkInvalidateMappedMemoryRanges(dev,1,&rgn);
+  if(result==VK_SUCCESS)
+    std::memcpy(mem,reinterpret_cast<const uint8_t*>(data)+shift,size);
   vkUnmapMemory(dev,page.page->memory);
-  return true;
+  vkAssert(result);
   }
 
 uint8_t* VAllocator::mapDescriptorHeap(VBuffer& src) {
@@ -553,12 +550,10 @@ bool VAllocator::commit(VkDeviceMemory dmem, std::mutex &mmapSync, VkBuffer dest
     return false;
   if(mem!=nullptr) {
     void* data=nullptr;
-    if(vkMapMemory(dev,dmem,pageOffset,rgn.size,0,&data)!=VK_SUCCESS)
-      return false;
+    vkAssert(vkMapMemory(dev,dmem,rgn.offset,rgn.size,0,&data));
     data = reinterpret_cast<uint8_t*>(data)+shift;
     std::memcpy(data, mem, size);
-    vkFlushMappedMemoryRanges(dev,1,&rgn);
-    vkUnmapMemory(dev,dmem);
+    flushAndUnmap(dev,rgn);
     }
 
   return true;

@@ -50,9 +50,9 @@ class VAllocator {
     void     free(Allocation& page);
     void     free(VTexture& buf);
 
-    bool     fill  (VBuffer& dest, uint32_t    mem, size_t offset, size_t size);
-    bool     update(VBuffer& dest, const void *mem, size_t offset, size_t size);
-    bool     read  (VBuffer& src,        void *mem, size_t offset, size_t size);
+    void     fill  (VBuffer& dest, uint32_t    mem, size_t offset, size_t size);
+    void     update(VBuffer& dest, const void *mem, size_t offset, size_t size);
+    void     read  (VBuffer& src,        void *mem, size_t offset, size_t size);
 
     uint8_t* mapDescriptorHeap(VBuffer& heap);
     void     unmapDescriptorHeap(VBuffer& heap);
