@@ -11,6 +11,9 @@ namespace Tempest {
 
 class AndroidApi final : SystemApi {
   public:
+    // Touch slots have nonnegative IDs. The physical mouse has independent button capture.
+    static constexpr int MousePointerId = -1;
+
     struct GamepadState {
       enum Button : uint8_t {
         A, B, X, Y, LeftShoulder, RightShoulder, LeftStick, RightStick, Start, Back,

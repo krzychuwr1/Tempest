@@ -686,7 +686,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
         const bool is  = (now     & m.bit)!=0;
         if(was==is)
           continue;
-        MouseEvent e(center.x, center.y, m.b, Event::M_NoModifier, 0, 0, is ? Event::MouseDown : Event::MouseUp);
+        MouseEvent e(center.x, center.y, m.b, Event::M_NoModifier, 0, MousePointerId, is ? Event::MouseDown : Event::MouseUp);
         sendPointer(e);
         }
       mousePressed = now;
@@ -694,7 +694,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
       }
     case AMOTION_EVENT_ACTION_SCROLL: {
       const float v = AMotionEvent_getAxisValue(event,AMOTION_EVENT_AXIS_VSCROLL,0);
-      MouseEvent e(center.x, center.y, Event::ButtonNone, Event::M_NoModifier, int(v*120.f), 0, Event::MouseWheel);
+      MouseEvent e(center.x, center.y, Event::ButtonNone, Event::M_NoModifier, int(v*120.f), MousePointerId, Event::MouseWheel);
       sendPointer(e);
       return true;
       }
@@ -702,7 +702,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
     case AMOTION_EVENT_ACTION_MOVE: {
       if(dx==0 && dy==0)
         return true;
-      MouseEvent e(at.x, at.y, Event::ButtonNone, Event::M_NoModifier, 0, 0, Event::MouseMove);
+      MouseEvent e(at.x, at.y, Event::ButtonNone, Event::M_NoModifier, 0, MousePointerId, Event::MouseMove);
       sendPointer(e);
       return true;
       }
