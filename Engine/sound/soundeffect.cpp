@@ -83,7 +83,7 @@ struct SoundEffect::Impl {
 
   static ALsizei bufferCallback(ALvoid *userptr, ALvoid *sampledata, ALsizei numbytes) noexcept {
     auto& self = *reinterpret_cast<Impl*>(userptr);
-    self.renderSound(reinterpret_cast<int16_t*>(sampledata), numbytes/(sizeof(int16_t)*2));
+    self.renderSound(reinterpret_cast<int16_t*>(sampledata), numbytes/(sizeof(int16_t)*self.producer->channels));
     return numbytes;
     }
 
