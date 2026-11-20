@@ -107,7 +107,7 @@ class VCommandBuffer:public AbstractGraphicsApi::CommandBuffer {
   protected:
     void addDependency(VTextureSwapchain& img);
     void vkCmdPipelineBarrier2(VkCommandBuffer impl, const VkDependencyInfoKHR* info);
-    void vkCmdBeginRenderingKHR(VkCommandBuffer impl, const VkRenderingInfo* info);
+    void vkCmdBeginRenderingKHR(VkCommandBuffer impl, const VkRenderingInfo* info, const FrameBufferDesc& attachments, size_t count);
     void vkCmdEndRenderingKHR(VkCommandBuffer impl);
 
     void blit(AbstractGraphicsApi::Texture& src, uint32_t srcW, uint32_t srcH, uint32_t srcMip,

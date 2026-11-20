@@ -96,7 +96,7 @@ void VFramebufferMap::notifyDestroy(VkImageView img) {
     }
   }
 
-std::shared_ptr<VFramebufferMap::Fbo> VFramebufferMap::find(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo) {
+std::shared_ptr<VFramebufferMap::Fbo> VFramebufferMap::find(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo, VkExtent2D extent) {
   VkImageView attach[MaxFramebufferAttachments] = {};
   for(uint8_t i=0; i<info->colorAttachmentCount; ++i) {
     attach[i] = info->pColorAttachments[i].imageView;
@@ -114,7 +114,7 @@ std::shared_ptr<VFramebufferMap::Fbo> VFramebufferMap::find(const VkRenderingInf
       return i;
   val.push_back(std::make_shared<Fbo>());
   try {
-    *val.back() = mkFbo(info, fbo, attach, attCount);
+    *val.back() = mkFbo(info, fbo, attach, attCount, extent);
     }
   catch(...) {
     val.pop_back();
@@ -123,10 +123,10 @@ std::shared_ptr<VFramebufferMap::Fbo> VFramebufferMap::find(const VkRenderingInf
   return val.back();
   }
 
-VFramebufferMap::Fbo VFramebufferMap::mkFbo(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo, const VkImageView* attach, size_t attCount) {
+VFramebufferMap::Fbo VFramebufferMap::mkFbo(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo, const VkImageView* attach, size_t attCount, VkExtent2D extent) {
   Fbo ret = {};
   ret.pass = findRenderpass(info, fbo);
-  ret.fbo  = mkFramebuffer(attach, attCount, info->renderArea.extent, ret.pass->pass);
+  ret.fbo  = mkFramebuffer(attach, attCount, extent, ret.pass->pass);
 
   std::memcpy(ret.view, attach, attCount*sizeof(VkImageView));
   ret.descSize = uint8_t(attCount);

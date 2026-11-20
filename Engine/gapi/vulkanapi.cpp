@@ -305,7 +305,7 @@ struct Tempest::Detail::VulkanInteropAccess {
     auto* d = dynamic_cast<VDevice*>(source.dev);
     if(d==nullptr || image==VK_NULL_HANDLE)
       throw std::system_error(Tempest::GraphicsErrc::NoDevice);
-    VTexture tex(*d, image, nativeFormat(frm), layers);
+    VTexture tex(*d, image, nativeFormat(frm), {w,h}, layers);
     AbstractGraphicsApi::PTexture impl(new VTextureWithFbo(std::move(tex)));
     return Attachment(Texture2d(std::move(impl), w, h, 1, frm));
     }
@@ -314,9 +314,19 @@ struct Tempest::Detail::VulkanInteropAccess {
     auto* d = dynamic_cast<VDevice*>(source.dev);
     if(d==nullptr || image==VK_NULL_HANDLE)
       throw std::system_error(Tempest::GraphicsErrc::NoDevice);
-    VTexture tex(*d, image, nativeFormat(frm), layers);
+    VTexture tex(*d, image, nativeFormat(frm), {w,h}, layers);
     AbstractGraphicsApi::PTexture impl(new VTextureWithFbo(std::move(tex)));
     return ZBuffer(Texture2d(std::move(impl), w, h, 1, frm), true);
+    }
+
+  template<class Image>
+  static void setExtent(Image& image, uint32_t w, uint32_t h) {
+    auto& tex = image.tImpl;
+    auto* img = dynamic_cast<VTexture*>(tex.impl.handler);
+    if(img==nullptr || w==0 || h==0 || w>img->borrowedExtent.width || h>img->borrowedExtent.height)
+      throw std::invalid_argument("Invalid borrowed image render extent");
+    tex.texW = int(w);
+    tex.texH = int(h);
     }
 
   static VulkanNativeImage image(const Tempest::Attachment& source) {
@@ -334,6 +344,14 @@ VulkanNativeContext Tempest::vulkanNativeContext(Tempest::Device& device) {
 
 VulkanNativeImage Tempest::vulkanNativeImage(const Tempest::Attachment& image) {
   return Detail::VulkanInteropAccess::image(image);
+  }
+
+void Tempest::vulkanSetBorrowedExtent(Attachment& image, uint32_t width, uint32_t height) {
+  Detail::VulkanInteropAccess::setExtent(image,width,height);
+  }
+
+void Tempest::vulkanSetBorrowedExtent(ZBuffer& image, uint32_t width, uint32_t height) {
+  Detail::VulkanInteropAccess::setExtent(image,width,height);
   }
 
 Attachment Tempest::vulkanBorrowColorAttachment(Device& device, VkImage image, uint32_t width, uint32_t height) {

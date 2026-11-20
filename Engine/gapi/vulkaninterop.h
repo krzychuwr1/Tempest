@@ -54,6 +54,9 @@ Attachment          vulkanBorrowColorAttachment(Device& device, VkImage image, u
 // Same for other colour formats (for example RGBA16F motion vectors) and for depth images
 Attachment          vulkanBorrowColorAttachment(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format);
 ZBuffer             vulkanBorrowDepthAttachment(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format);
+// Select the upper-left render area of a borrowed image within its original extent.
+void                vulkanSetBorrowedExtent(Attachment& image, uint32_t width, uint32_t height);
+void                vulkanSetBorrowedExtent(ZBuffer& image, uint32_t width, uint32_t height);
 // Multiview: render targets over external images with several array layers (one per view),
 // and the view mask of the render passes begun next (0: ordinary single-view rendering)
 Attachment          vulkanBorrowLayeredAttachment(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format, uint32_t layers);

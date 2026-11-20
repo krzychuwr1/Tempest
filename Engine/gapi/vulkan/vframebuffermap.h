@@ -49,12 +49,12 @@ class VFramebufferMap {
       bool           hasImg(VkImageView v) const;
       };
 
-    std::shared_ptr<Fbo> find(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo);
+    std::shared_ptr<Fbo> find(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo, VkExtent2D extent);
     void                 notifyDestroy(VkImageView img);
 
   private:
     std::shared_ptr<RenderPass> findRenderpass(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo);
-    Fbo                mkFbo(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo, const VkImageView* attach, size_t attCount);
+    Fbo                mkFbo(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo, const VkImageView* attach, size_t attCount, VkExtent2D extent);
     VkRenderPass       mkRenderPass(const VkRenderingInfo* info, const VkPipelineRenderingCreateInfoKHR* fbo);
     VkFramebuffer      mkFramebuffer(const VkImageView* view, size_t cnt, VkExtent2D size, VkRenderPass rp);
 

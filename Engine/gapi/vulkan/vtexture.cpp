@@ -22,6 +22,7 @@ VTexture::VTexture(VTexture&& other) {
   std::swap(is3D,           other.is3D);
   std::swap(isFilterable,   other.isFilterable);
   std::swap(borrowed,       other.borrowed);
+  std::swap(borrowedExtent, other.borrowedExtent);
   std::swap(layers,         other.layers);
   std::swap(extViews,       other.extViews);
   std::swap(extDescr,       other.extDescr);
@@ -33,8 +34,8 @@ static NonUniqResId borrowedSyncId() {
   return NonUniqResId(1u << (i.fetch_add(1) % 32));
   }
 
-VTexture::VTexture(VDevice& device, VkImage image, VkFormat viewFormat, uint32_t layerCount)
-  :impl(image), format(viewFormat), nonUniqId(borrowedSyncId()), alloc(&device.allocator), borrowed(true), layers(layerCount) {
+VTexture::VTexture(VDevice& device, VkImage image, VkFormat viewFormat, VkExtent2D extent, uint32_t layerCount)
+  :impl(image), format(viewFormat), nonUniqId(borrowedSyncId()), alloc(&device.allocator), borrowed(true), borrowedExtent(extent), layers(layerCount) {
   createViews(device.device.impl);
   }
 

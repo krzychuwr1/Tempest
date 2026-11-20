@@ -486,7 +486,7 @@ void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, 
       profPassNames.clear();
       profHasCandidate = false;
       }
-    vkCmdBeginRenderingKHR(impl,&info);
+    vkCmdBeginRenderingKHR(impl,&info,fbo,fboSize);
   }
   state = RenderPass;
 
@@ -1282,13 +1282,25 @@ void VCommandBuffer::barrier(const AbstractGraphicsApi::SyncDesc& s, const Abstr
                        memCount, &memBarrier, bufCount, bufBarrier, imgCount, imgBarrier);
   }
 
-void VCommandBuffer::vkCmdBeginRenderingKHR(VkCommandBuffer impl, const VkRenderingInfo* info) {
+void VCommandBuffer::vkCmdBeginRenderingKHR(VkCommandBuffer impl, const VkRenderingInfo* info, const FrameBufferDesc& attachments, size_t count) {
   if(device.props.hasDynRendering) {
     device.vkCmdBeginRenderingKHR(impl,info);
     return;
     }
 
-  auto fbo = device.fboMap.find(info, &passDyn);
+  // A borrowed image can render to a smaller rectangle on each acquisition.
+  // Cache a framebuffer covering the underlying images across all of those sizes.
+  VkExtent2D extent = {UINT32_MAX,UINT32_MAX};
+  for(size_t i=0; i<count; ++i) {
+    const auto& texture = static_cast<const VTexture&>(*attachments.att[i]);
+    if(!texture.borrowed) {
+      extent = info->renderArea.extent;
+      break;
+      }
+    extent.width  = std::min(extent.width,texture.borrowedExtent.width);
+    extent.height = std::min(extent.height,texture.borrowedExtent.height);
+    }
+  auto fbo = device.fboMap.find(info, &passDyn, count>0 ? extent : info->renderArea.extent);
   auto fb  = fbo.get();
   passRp   = fbo->pass;
 
