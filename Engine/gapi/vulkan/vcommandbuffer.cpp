@@ -175,7 +175,13 @@ void VCommandBuffer::reset() {
     }
   for(size_t i=1; i<chunks.size(); ++i) {
     auto cmd = node->val[i%chunks.chunkSize].impl;
-    vkFreeCommandBuffers(device.device.impl,pool.impl,1,&cmd);
+#if defined(__ANDROID__)
+    // Pool reset already returned each command to its initial state.
+    if(spareCount<spareCommands.size())
+      spareCommands[spareCount++] = cmd;
+    else
+#endif
+      vkFreeCommandBuffers(device.device.impl,pool.impl,1,&cmd);
     if((i+1)%chunks.chunkSize==0)
       node = node->next;
     }
@@ -1327,12 +1333,19 @@ void VCommandBuffer::pushChunk() {
 void VCommandBuffer::newChunk() {
   pushChunk();
 
-  VkCommandBufferAllocateInfo allocInfo = {};
-  allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-  allocInfo.commandPool        = pool.impl;
-  allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-  allocInfo.commandBufferCount = 1;
-  vkAssert(vkAllocateCommandBuffers(device.device.impl,&allocInfo,&impl));
+#if defined(__ANDROID__)
+  if(spareCount>0) {
+    impl = spareCommands[--spareCount];
+    } else
+#endif
+    {
+    VkCommandBufferAllocateInfo allocInfo = {};
+    allocInfo.sType              = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    allocInfo.commandPool        = pool.impl;
+    allocInfo.level              = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    allocInfo.commandBufferCount = 1;
+    vkAssert(vkAllocateCommandBuffers(device.device.impl,&allocInfo,&impl));
+    }
 
   VkCommandBufferBeginInfo beginInfo = {};
   beginInfo.sType            = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;

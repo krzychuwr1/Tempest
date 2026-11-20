@@ -1,5 +1,7 @@
 #pragma once
 
+#include <array>
+
 #include <Tempest/AbstractGraphicsApi>
 #include "vulkan_sdk.h"
 #include "../vulkaninterop.h"
@@ -141,6 +143,10 @@ class VCommandBuffer:public AbstractGraphicsApi::CommandBuffer {
 
     VDevice&                                device;
     VCommandPool                            pool;
+#if defined(__ANDROID__)
+    std::array<VkCommandBuffer,MaxCmdChunks> spareCommands;
+    size_t                                  spareCount = 0;
+#endif
     VkCommandBuffer                         impl=nullptr;
 
     ResourceState                           resState;
