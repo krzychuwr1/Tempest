@@ -54,6 +54,7 @@ static float            externalUiScale      = 1.f;
 static AndroidApi::GamepadState gamepadState;
 static Point                    mouseLast;
 static bool                     mouseValid = false;
+static int32_t                  mousePressed = 0;
 
 // Touches are recorded during polling and dispatched one per event-processing pass.
 // Modal loops in event handlers poll recursively, so direct dispatch could reorder pointers of one AInputEvent.
@@ -259,6 +260,12 @@ void AndroidApi::updateFocus() {
   if(active==next)
     return;
   active = next;
+  if(!active) {
+    gamepadState = {};
+    mouseValid = false;
+    mousePressed = 0;
+    releaseAllTouches();
+    }
   if(mainWindow!=nullptr) {
     FocusEvent event(active,Event::FocusReason::UnknownReason);
     AndroidApi::dispatchFocus(*mainWindow,event);
@@ -394,7 +401,6 @@ bool AndroidApi::processMouseEvent(const void* input) {
     case AMOTION_EVENT_ACTION_BUTTON_PRESS:
     case AMOTION_EVENT_ACTION_BUTTON_RELEASE: {
       // AMotionEvent_getActionButton needs API 33: compare the whole button state instead
-      static int32_t pressed = 0;
       const int32_t  now     = AMotionEvent_getButtonState(event);
       const struct { int32_t bit; Event::MouseButton b; } map[] = {
         {AMOTION_EVENT_BUTTON_PRIMARY,   Event::ButtonLeft },
@@ -402,7 +408,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
         {AMOTION_EVENT_BUTTON_TERTIARY,  Event::ButtonMid  },
         };
       for(auto& m:map) {
-        const bool was = (pressed & m.bit)!=0;
+        const bool was = (mousePressed & m.bit)!=0;
         const bool is  = (now     & m.bit)!=0;
         if(was==is)
           continue;
@@ -411,7 +417,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
           SystemApi::dispatchMouseDown(*mainWindow,e); else
           SystemApi::dispatchMouseUp  (*mainWindow,e);
         }
-      pressed = now;
+      mousePressed = now;
       return true;
       }
     case AMOTION_EVENT_ACTION_SCROLL: {
