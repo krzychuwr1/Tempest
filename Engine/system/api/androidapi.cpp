@@ -481,7 +481,9 @@ bool AndroidApi::processKeyEvent(const void* input) {
   if(mainWindow==nullptr)
     return true;
 
-  KeyEvent e(kt, chr, translateModifiers(meta), down ? Event::KeyDown : Event::KeyUp);
+  const bool cancelled = (AKeyEvent_getFlags(event) & AKEY_EVENT_FLAG_CANCELED)!=0;
+  const auto type = down ? Event::KeyDown : (cancelled ? Event::KeyCancel : Event::KeyUp);
+  KeyEvent e(kt, chr, translateModifiers(meta), type);
   uint32_t scan = uint32_t(AKeyEvent_getScanCode(event));
   if(scan==0)
     scan = 0x40000000u | uint32_t(code);
@@ -535,6 +537,8 @@ bool AndroidApi::processMouseEvent(const void* input) {
         {AMOTION_EVENT_BUTTON_PRIMARY,   Event::ButtonLeft },
         {AMOTION_EVENT_BUTTON_SECONDARY, Event::ButtonRight},
         {AMOTION_EVENT_BUTTON_TERTIARY,  Event::ButtonMid  },
+        {AMOTION_EVENT_BUTTON_BACK,      Event::ButtonBack },
+        {AMOTION_EVENT_BUTTON_FORWARD,   Event::ButtonForward},
         };
       for(auto& m:map) {
         const bool was = (mousePressed & m.bit)!=0;
