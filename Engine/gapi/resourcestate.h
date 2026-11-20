@@ -58,6 +58,7 @@ class ResourceState {
     Stage     uavWrite[PipelineStage::S_Count] = {};
     SyncStage uavSrcBarrier = SyncStage::None;
     SyncStage uavDstBarrier = SyncStage::None;
+    SyncStage hostWriters   = SyncStage::None;
   };
 
 }

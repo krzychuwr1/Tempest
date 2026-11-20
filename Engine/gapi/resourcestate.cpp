@@ -120,12 +120,11 @@ void ResourceState::onUavUsage(const Usage& u, PipelineStage st, bool host) {
       }
     }
 
-  if(host) {
-    uavDstBarrier = uavDstBarrier | SyncStage::TransferHost;
-    }
-
   if(u.speculative)
     return;
+  // A flush before a draw, dispatch or copy cannot publish the write it is about to record.
+  if(host)
+    hostWriters = hostWriters | toSyncStage(st, false);
 
   for(PipelineStage p = PipelineStage::S_First; p<PipelineStage::S_Count; p = PipelineStage(p+1)) {
     uavRead [p].depend[st] |= u.read;
@@ -150,6 +149,11 @@ void ResourceState::finalize(AbstractGraphicsApi::CommandBuffer& cmd) {
     joinWriters(p);
     }
 
+  if(hostWriters!=SyncStage::None) {
+    uavSrcBarrier = uavSrcBarrier | hostWriters;
+    uavDstBarrier = uavDstBarrier | SyncStage::TransferHost;
+    hostWriters   = SyncStage::None;
+    }
   if(imgState.size()==0 && uavSrcBarrier==SyncStage::None) {
     fillReads();
     return; // early-out

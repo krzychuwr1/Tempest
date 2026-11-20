@@ -467,7 +467,7 @@ void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, 
 
 void VCommandBuffer::endRendering() {
   vkCmdEndRenderingKHR(impl);
-  resState.onUavUsage(bindings.read, bindings.write, PipelineStage::S_Graphics);
+  resState.onUavUsage(bindings.read, bindings.write, PipelineStage::S_Graphics, bindings.host);
   resState.flush(*this);
   resState.endRendering(*this);
 

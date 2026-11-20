@@ -185,6 +185,33 @@ TEST(main, ResourceStateTranfer) {
   rs.flush(cmd);
   }
 
+TEST(main, ResourceStateHostReadAfterWrites) {
+  ResourceState     rs;
+  TestCommandBuffer cmd;
+
+  // Include an untracked staging allocation as used by standalone image readback.
+  rs.onTranferUsage(NonUniqResId::I_None, NonUniqResId::I_None, true);
+  rs.flush(cmd);
+  rs.onUavUsage(NonUniqResId::I_None, NonUniqResId(1), S_Compute, true);
+  rs.flush(cmd);
+  rs.onUavUsage(NonUniqResId::I_None, NonUniqResId(2), S_Graphics, true);
+  rs.flush(cmd);
+  for(auto& b:cmd.barriers)
+    EXPECT_EQ(b.sync.next & SyncStage::TransferHost, SyncStage::None);
+
+  cmd.barriers.clear();
+  rs.finalize(cmd);
+  ASSERT_FALSE(cmd.barriers.empty());
+  const auto& sync = cmd.barriers.back().sync;
+  const auto writes = SyncStage::TransferDst | SyncStage::ComputeWrite | SyncStage::GraphicsWrite;
+  EXPECT_EQ(sync.prev & writes, writes);
+  EXPECT_EQ(sync.next & SyncStage::TransferHost, SyncStage::TransferHost);
+
+  cmd.barriers.clear();
+  rs.finalize(cmd);
+  EXPECT_TRUE(cmd.barriers.empty());
+  }
+
 TEST(main, ResourceStateBlas) {
   TestCommandBuffer cmd;
 
