@@ -76,12 +76,12 @@ class VectorImage : public Tempest::PaintDevice {
 
     struct Texture {
       TexPtr        brush;
-      TextureFormat frm;
-      ClampMode     clamp;
+      TextureFormat frm   = TextureFormat::Undefined;
+      ClampMode     clamp = ClampMode::Repeat;
       Sprite        sprite; //TODO: dangling sprites
 
       bool     operator==(const Texture& t) const {
-        return brush==t.brush && sprite.pageId()==t.sprite.pageId();
+        return brush==t.brush && frm==t.frm && clamp==t.clamp && sprite.pageId()==t.sprite.pageId();
         }
       };
 
@@ -105,7 +105,7 @@ class VectorImage : public Tempest::PaintDevice {
 
       size_t         begin  = 0;
       size_t         size   = 0;
-      bool           hasImg = false;
+      bool hasImg() const { return bool(tex.brush) || !tex.sprite.isEmpty(); }
       };
 
     Topology                    topology=Triangles;

@@ -35,9 +35,11 @@ size_t VectorImage::pushState() {
 
 void VectorImage::popState(size_t id) {
   State& s = stateStk[id];
-  State& b = reinterpret_cast<State&>(blocks.back());
-  if(b==s)
+  State& b = blocks.back();
+  if(b==s) {
+    stateStk.resize(id);
     return;
+    }
   if(blocks.back().size==0) {
     b=s;
     } else {
@@ -68,13 +70,11 @@ void VectorImage::setState(const T &t) {
 void VectorImage::setState(const TexPtr &t, const Color&, TextureFormat frm, ClampMode clamp) {
   Texture tex={t,frm,clamp,Sprite()};
   setState<Texture,&State::tex>(tex);
-  blocks.back().hasImg=bool(t);
   }
 
 void VectorImage::setState(const Sprite &s, const Color&) {
   Texture tex={TexPtr(),TextureFormat::Undefined,ClampMode::Repeat,s};
   setState<Texture,&State::tex>(tex);
-  blocks.back().hasImg=!s.isEmpty();
 
   slock.insert(s);
   }
@@ -112,7 +112,7 @@ void VectorImage::commitPoints() {
 
 const RenderPipeline& VectorImage::pipelineOf(Device& dev, const VectorImage::Block& b) const {
   const RenderPipeline* p;
-  if(b.hasImg) {
+  if(b.hasImg()) {
     if(b.tp==Triangles){
       if(b.blend==NoBlend)
         p=&dev.builtin().texture2d().brush; else
@@ -191,7 +191,7 @@ void VectorImage::Mesh::update(Device& dev, const VectorImage& src, BufferHeap h
     auto& p = src.pipelineOf(dev,b);
     ux.pipeline = &p;
 
-    if(T_LIKELY(b.hasImg)) {
+    if(T_LIKELY(b.hasImg())) {
       Sampler s = Sampler::bilinear();
       if(b.tex.brush) {
         s.uClamp   = b.tex.clamp;
@@ -199,6 +199,7 @@ void VectorImage::Mesh::update(Device& dev, const VectorImage& src, BufferHeap h
         ux.smp     = s;
         ux.format  = b.tex.frm;
         ux.texture = b.tex.brush;
+        ux.sprite  = {};
         } else {
         auto& tex = b.tex.sprite.pageRawData(dev); //TODO: oom
         ux.texture = TexPtr(tex);
@@ -206,6 +207,9 @@ void VectorImage::Mesh::update(Device& dev, const VectorImage& src, BufferHeap h
         ux.format  = tex.format();
         ux.sprite  = b.tex.sprite;
         }
+      } else {
+      ux.texture = {};
+      ux.sprite  = {};
       }
     }
   }
