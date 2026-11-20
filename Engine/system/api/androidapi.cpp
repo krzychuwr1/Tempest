@@ -19,6 +19,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdlib>
 #include <dlfcn.h>
 #include <exception>
@@ -53,6 +54,9 @@ static float            externalUiScale      = 1.f;
 
 static AndroidApi::GamepadState gamepadState;
 static AndroidApi::GamepadState gamepadKeys;
+// Android can expose separate input device IDs for buttons and axes.
+static int32_t                  axisDevice = -1, keyDevice = -1;
+static std::chrono::steady_clock::time_point nextPadCheck;
 static Point                    mouseLast;
 static bool                     mouseValid = false;
 static int32_t                  mousePressed = 0;
@@ -229,7 +233,59 @@ bool AndroidApi::activityResumed() {
   return resumed;
   }
 
+static void selectPad(int32_t& current, AndroidApi::GamepadState& state, const AInputEvent* event) {
+  const int32_t id = AInputEvent_getDeviceId(event);
+  if(current!=id) {
+    state = {};
+    current = id;
+    }
+  state.connected = true;
+  // Input itself proves that this device is present.
+  if((!gamepadState.connected || axisDevice==id) && (!gamepadKeys.connected || keyDevice==id))
+    nextPadCheck = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
+  }
+
+static void checkPadDevices() {
+  if(!gamepadState.connected && !gamepadKeys.connected)
+    return;
+  const auto now = std::chrono::steady_clock::now();
+  if(now<nextPadCheck)
+    return;
+  nextPadCheck = now + std::chrono::milliseconds(500);
+  // NativeActivity receives button/axis events, but a removed device is
+  // not guaranteed to deliver a final neutral sample.
+  auto vm = app->activity->vm;
+  JNIEnv* env = nullptr;
+  const bool attach = vm->GetEnv(reinterpret_cast<void**>(&env),JNI_VERSION_1_6)==JNI_EDETACHED;
+  if(attach && vm->AttachCurrentThread(&env,nullptr)!=JNI_OK)
+    return;
+  if(env==nullptr)
+    return;
+  jclass cls = env->FindClass("android/view/InputDevice");
+  jmethodID method = cls ? env->GetStaticMethodID(cls,"getDevice","(I)Landroid/view/InputDevice;") : nullptr;
+  auto removed = [&](int32_t id) {
+    if(method==nullptr || env->ExceptionCheck())
+      return false;
+    jobject obj = env->CallStaticObjectMethod(cls,method,jint(id));
+    const bool gone = obj==nullptr && !env->ExceptionCheck();
+    env->DeleteLocalRef(obj);
+    return gone;
+    };
+  const bool axisGone = gamepadState.connected && removed(axisDevice);
+  const bool sharedDevice = gamepadState.connected && keyDevice==axisDevice;
+  if(gamepadKeys.connected && (sharedDevice ? axisGone : removed(keyDevice)))
+    gamepadKeys = {};
+  if(axisGone)
+    gamepadState = {};
+  if(env->ExceptionCheck())
+    env->ExceptionClear();
+  env->DeleteLocalRef(cls);
+  if(attach)
+    vm->DetachCurrentThread();
+  }
+
 AndroidApi::GamepadState AndroidApi::gamepad() {
+  checkPadDevices();
   auto state = gamepadState;
   state.connected |= gamepadKeys.connected;
   state.lt = std::max(state.lt, gamepadKeys.lt);
@@ -369,14 +425,14 @@ bool AndroidApi::processKeyEvent(const void* input) {
 
   const int button = gamepadButton(code, isGamepadSource(AInputEvent_getSource(event)));
   if(button>=0) {
+    selectPad(keyDevice, gamepadKeys, event);
     gamepadKeys.buttons[button] = down;
-    gamepadKeys.connected       = true;
     return true;
     }
   if(code==AKEYCODE_BUTTON_L2 || code==AKEYCODE_BUTTON_R2) {
+    selectPad(keyDevice, gamepadKeys, event);
     auto& trigger = code==AKEYCODE_BUTTON_L2 ? gamepadKeys.lt : gamepadKeys.rt;
     trigger = down ? 1.f : 0.f;
-    gamepadKeys.connected = true;
     return true;
     }
   if(code==AKEYCODE_BACK || code==AKEYCODE_VOLUME_UP || code==AKEYCODE_VOLUME_DOWN)
@@ -477,7 +533,7 @@ int32_t AndroidApi::onInputEvent(const void* input) {
     return processKeyEvent(event) ? 1 : 0;
   if(AInputEvent_getType(event)==AINPUT_EVENT_TYPE_MOTION && isGamepadSource(source)) {
     auto axis = [event](int32_t a) { return AMotionEvent_getAxisValue(event,a,0); };
-    gamepadState.connected = true;
+    selectPad(axisDevice, gamepadState, event);
     gamepadState.lx = axis(AMOTION_EVENT_AXIS_X);
     gamepadState.ly = axis(AMOTION_EVENT_AXIS_Y);
     gamepadState.rx = axis(AMOTION_EVENT_AXIS_Z);
