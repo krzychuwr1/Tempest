@@ -1001,11 +1001,11 @@ std::shared_ptr<VFence> VDevice::findAvailableFence() {
       if(i.use_count()>1 && pass==0)
         continue;
       if(i.use_count()>1) {
-        auto fence = i->fence;
-        //NOTE: application may still hold references to `i`
+        // Allocate the replacement before detaching the live handle from the old wrapper.
+        auto next = std::make_shared<VFence>(this, i->fence, id);
         i->fence = VK_NULL_HANDLE;
         i->clearPayload();
-        i = std::make_shared<VFence>(this, fence, id);
+        i = std::move(next);
         }
       vkAssert(vkResetFences(device.impl, 1, &i->fence));
       i->status = VK_NOT_READY;
@@ -1055,19 +1055,15 @@ std::shared_ptr<VFence> VDevice::aquireFence() {
       continue;
 
     VkFence fence = VK_NULL_HANDLE;
+    VkFenceCreateInfo fenceInfo = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    vkAssert(vkCreateFence(device.impl,&fenceInfo,nullptr,&fence));
     try {
-      VkFenceCreateInfo fenceInfo = {};
-      fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-      fenceInfo.flags = 0;
-      vkAssert(vkCreateFence(device.impl,&fenceInfo,nullptr,&fence));
-
       i = std::make_shared<VFence>(this, fence, uint32_t(id));
       i->status = VK_NOT_READY;
       return i;
       }
     catch(...) {
-      if(f!=VK_NULL_HANDLE)
-        vkDestroyFence(device.impl, fence, nullptr);
+      vkDestroyFence(device.impl, fence, nullptr);
       throw;
       }
     }
@@ -1079,47 +1075,23 @@ std::shared_ptr<VFence> VDevice::aquireFence() {
   }
 
 VkResult VDevice::waitFence(VFence& t, uint64_t timeout) {
-  {
-    std::lock_guard<std::mutex> guard(timeline.sync);
-    if(t.fence==VK_NULL_HANDLE || t.status==VK_SUCCESS)
-      return VK_SUCCESS;
-    if(timeout==0) {
-      const auto st = vkGetFenceStatus(device.impl, t.fence);
-      t.setStatus(st);
-      if(st<=0 && st!=VK_NOT_READY)
-        return st;
-      return VK_NOT_READY;
-      }
-  }
+  std::lock_guard<std::mutex> guard(timeline.sync);
+  if(t.fence==VK_NULL_HANDLE || t.status!=VK_NOT_READY)
+    return t.status;
 
-  auto tickCount = []() {
-    auto now = std::chrono::steady_clock::now();
-    auto ms = std::chrono::time_point_cast<std::chrono::milliseconds>(now);
-    return uint64_t(ms.time_since_epoch().count())-uint64_t(INT64_MIN);
-    };
-
-  auto start = tickCount();
-  while(true) {
-    static const uint64_t toNano = uint64_t(1000*1000);
-    uint64_t vkTime = 0;
-    if(timeout < std::numeric_limits<uint64_t>::max()/toNano) {
-      vkTime = timeout*toNano; // millis to nano convertion
-      } else {
-      vkTime = std::numeric_limits<uint64_t>::max();
-      }
-
-    std::lock_guard<std::mutex> guard(timeline.sync);
-    waitAny(vkTime);
-    if(t.fence==VK_NULL_HANDLE || t.status==VK_SUCCESS)
-      return VK_SUCCESS;
-    if(t.status<0 && t.status!=VK_NOT_READY)
-      return t.status;
-
-    auto now = tickCount();
-    if(now-start > timeout)
-      return VK_NOT_READY;
-    timeout -= (now-start);
+  VkResult result;
+  if(timeout==0) {
+    result = vkGetFenceStatus(device.impl, t.fence);
+    } else {
+    constexpr uint64_t perMs = 1000000;
+    constexpr uint64_t maxNs = std::numeric_limits<uint64_t>::max();
+    const uint64_t ns = timeout>maxNs/perMs ? maxNs : timeout*perMs;
+    result = vkWaitForFences(device.impl, 1, &t.fence, VK_TRUE, ns);
     }
+  if(result==VK_TIMEOUT)
+    return VK_NOT_READY;
+  t.setStatus(result);
+  return result;
   }
 
 void VDevice::waitIdle() {
@@ -1152,12 +1124,21 @@ std::shared_ptr<VFence> VDevice::submit(VCommandBuffer& cmd) {
       }
     }
 
-  std::lock_guard<std::mutex> guard(timeline.sync);
-  auto pfence = aquireFence();
-  if(pfence==nullptr)
-    throw DeviceLostException();
-
-  VkFence fence = pfence->fence;
+  auto submitWithFence = [&](auto enqueue) {
+    std::lock_guard<std::mutex> guard(timeline.sync);
+    auto fence = aquireFence();
+    if(fence==nullptr)
+      throw DeviceLostException();
+    try {
+      enqueue(fence->fence);
+      }
+    catch(...) {
+      // No submitted work will signal this reservation.
+      fence->setStatus(VK_SUCCESS);
+      throw;
+      }
+    return fence;
+    };
 
   if(vkQueueSubmit2!=nullptr) {
     SmallArray<VkSemaphoreSubmitInfoKHR, 32> wait2(waitCnt);
@@ -1187,7 +1168,7 @@ std::shared_ptr<VFence> VDevice::submit(VCommandBuffer& cmd) {
     submitInfo.waitSemaphoreInfoCount = uint32_t(waitCnt);
     submitInfo.pWaitSemaphoreInfos    = wait2.get();
 
-    graphicsQueue->submit(1,&submitInfo,fence,vkQueueSubmit2);
+    return submitWithFence([&](VkFence fence) { graphicsQueue->submit(1,&submitInfo,fence,vkQueueSubmit2); });
     } else {
     SmallArray<VkPipelineStageFlags, 32> waitStages(waitCnt);
     for(size_t i=0; i<waitCnt; ++i) {
@@ -1210,9 +1191,8 @@ std::shared_ptr<VFence> VDevice::submit(VCommandBuffer& cmd) {
     submitInfo.pWaitSemaphores    = wait.get();
     submitInfo.pWaitDstStageMask  = waitStages.get();
 
-    graphicsQueue->submit(1,&submitInfo,fence);
+    return submitWithFence([&](VkFence fence) { graphicsQueue->submit(1,&submitInfo,fence); });
     }
-  return pfence;
   }
 
 

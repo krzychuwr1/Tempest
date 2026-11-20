@@ -19,13 +19,21 @@ bool VFence::wait(uint64_t time) {
 
 void VFence::setStatus(VkResult st) {
   status = st;
-  if(st < 0 || st==VK_SUCCESS || st==VK_TIMEOUT) {
+  if(st < 0 || st==VK_SUCCESS) {
     holdRes.clear();
     }
   }
 
 void VFence::setPayload(std::vector<ResPtr>&& res) {
-  holdRes = std::move(res);
+  {
+    std::lock_guard<std::mutex> guard(device->timeline.sync);
+    if(status==VK_NOT_READY) {
+      holdRes = std::move(res);
+      return;
+      }
+    }
+  // The submission completed before its staging resources reached the fence.
+  res.clear();
   }
 
 void VFence::clearPayload() {
