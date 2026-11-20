@@ -79,7 +79,7 @@ static void queuePadSample();
 // Android can expose separate input device IDs for buttons and axes.
 static int32_t                  axisDevice = -1, keyDevice = -1;
 static std::chrono::steady_clock::time_point nextPadCheck;
-static Point                    mouseLast;
+static PointF                   mouseLast, mouseFraction;
 static bool                     mouseValid = false;
 static int32_t                  mousePressed = 0;
 
@@ -485,6 +485,7 @@ void AndroidApi::updateFocus(bool cancel) {
     cancelPadSource(gamepadState,releaseAxes);
     cancelPadSource(gamepadKeys,releaseKeys);
     mouseValid = false;
+    mouseFraction = {};
     mousePressed = 0;
     touches.clear(); // Drop pending downs together with the dispatcher's captures.
     }
@@ -649,13 +650,21 @@ bool AndroidApi::processMouseEvent(const void* input) {
 
   const bool relative = (source & AINPUT_SOURCE_MOUSE_RELATIVE)==AINPUT_SOURCE_MOUSE_RELATIVE;
   float dx = 0, dy = 0;
-  const Point pos = AMotionEvent_getXY(event,0);
+  const PointF pos(AMotionEvent_getX(event,0), AMotionEvent_getY(event,0));
   if(relative) {
-    dx = AMotionEvent_getX(event,0);
-    dy = AMotionEvent_getY(event,0);
+    dx = pos.x;
+    dy = pos.y;
+    for(size_t i=0; i<AMotionEvent_getHistorySize(event); ++i) {
+      dx += AMotionEvent_getHistoricalX(event,0,i);
+      dy += AMotionEvent_getHistoricalY(event,0,i);
+      }
     } else {
     dx = AMotionEvent_getAxisValue(event,AMOTION_EVENT_AXIS_RELATIVE_X,0);
     dy = AMotionEvent_getAxisValue(event,AMOTION_EVENT_AXIS_RELATIVE_Y,0);
+    for(size_t i=0; i<AMotionEvent_getHistorySize(event); ++i) {
+      dx += AMotionEvent_getHistoricalAxisValue(event,AMOTION_EVENT_AXIS_RELATIVE_X,0,i);
+      dy += AMotionEvent_getHistoricalAxisValue(event,AMOTION_EVENT_AXIS_RELATIVE_Y,0,i);
+      }
     if(dx==0 && dy==0 && mouseValid) {
       dx = float(pos.x-mouseLast.x);
       dy = float(pos.y-mouseLast.y);
@@ -667,7 +676,7 @@ bool AndroidApi::processMouseEvent(const void* input) {
   // The game reads mouse-look as the offset from the window centre (desktop recentres the cursor every event)
   const Rect  rect   = implClientRectOf();
   const Point center = Point(rect.w/2,rect.h/2);
-  const Point at     = Point(center.x+int(dx), center.y+int(dy));
+
 
   switch(action) {
     case AMOTION_EVENT_ACTION_BUTTON_PRESS:
@@ -700,9 +709,12 @@ bool AndroidApi::processMouseEvent(const void* input) {
       }
     case AMOTION_EVENT_ACTION_HOVER_MOVE:
     case AMOTION_EVENT_ACTION_MOVE: {
-      if(dx==0 && dy==0)
+      mouseFraction += PointF(dx,dy);
+      const Point pixels(int(mouseFraction.x),int(mouseFraction.y));
+      if(pixels==Point())
         return true;
-      MouseEvent e(at.x, at.y, Event::ButtonNone, Event::M_NoModifier, 0, MousePointerId, Event::MouseMove);
+      mouseFraction -= PointF(float(pixels.x),float(pixels.y));
+      MouseEvent e(center.x+pixels.x, center.y+pixels.y, Event::ButtonNone, Event::M_NoModifier, 0, MousePointerId, Event::MouseMove);
       sendPointer(e);
       return true;
       }
