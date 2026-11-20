@@ -138,6 +138,9 @@ class Widget {
     virtual void keyDownEvent   (Tempest::KeyEvent&    event);
     virtual void keyRepeatEvent (Tempest::KeyEvent&    event);
     virtual void keyUpEvent     (Tempest::KeyEvent&    event);
+#ifdef __ANDROID__
+    virtual void keyCancelEvent (Tempest::KeyEvent&    event) { event.ignore(); }
+#endif
 
     virtual void mouseEnterEvent(Tempest::MouseEvent&  event);
     virtual void mouseLeaveEvent(Tempest::MouseEvent&  event);

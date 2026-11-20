@@ -42,6 +42,7 @@ class Event {
       Polish,
       Gesture,
       DisplayMetricsChanged,
+      KeyCancel,
 
       Custom = 512
       };

@@ -196,10 +196,17 @@ void EventDispatcher::dispatchKeyUp(Widget &/*wnd*/, KeyEvent &e, uint32_t scanc
   KeyEvent e1(e.key,e.code,mkModifier(),e.type());
   handleModKey(e);
 
-  if(auto w = lock((*it).second)){
-    keyUp.erase(it);
-    w->widget->keyUpEvent(e1);
+  auto w = lock(it->second);
+  keyUp.erase(it);
+  if(!w)
+    return;
+#ifdef __ANDROID__
+  if(e.type()==Event::KeyCancel) {
+    w->widget->keyCancelEvent(e1);
+    return;
     }
+#endif
+  w->widget->keyUpEvent(e1);
   }
 
 void EventDispatcher::dispatchResize(Widget& wnd, SizeEvent& e) {
