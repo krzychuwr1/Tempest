@@ -89,7 +89,12 @@ class EventDispatcher final {
     Modify keyMod;
     KeyEvent::Modifier mkModifier() const;
 
-    std::unordered_map<uint32_t,std::weak_ptr<Widget::Ref>> keyUp;
+    struct KeyCapture {
+      std::weak_ptr<Widget::Ref> target;
+      uint64_t                   pending = 0;
+      };
+    uint64_t                                keyPressCount = 0;
+    std::unordered_map<uint32_t,KeyCapture> keyUp;
   };
 
 }

@@ -162,8 +162,10 @@ void EventDispatcher::dispatchMouseWheel(Widget& wnd, MouseEvent &e) {
   }
 
 void EventDispatcher::dispatchKeyDown(Widget &wnd, KeyEvent &e, uint32_t scancode) {
-  auto k = keyUp[scancode];
-  if(auto w = lock(k)) {
+  auto& capture = keyUp[scancode];
+  if(capture.pending!=0)
+    return;
+  if(auto w = lock(capture.target)) {
     KeyEvent e1(e.key,e.code,mkModifier(),Event::KeyRepeat);
     w->widget->keyRepeatEvent(e1);
     return;
@@ -172,21 +174,27 @@ void EventDispatcher::dispatchKeyDown(Widget &wnd, KeyEvent &e, uint32_t scancod
   KeyEvent e1(e.key,e.code,mkModifier(),e.type());
   handleModKey(e);
 
-  for(auto i:overlays) {
-    if(!i->bind(wnd))
-      continue;
-    if(implShortcut(*i,e1))
-      return;
-    k = implDispatch(*i,e1);
-    keyUp[scancode] = k;
-    if(!k.expired())
-      return;
-    }
+  const uint64_t press = ++keyPressCount;
+  capture.pending = press;
+  auto deliver = [&](Widget& receiver) {
+    const bool shortcut = implShortcut(receiver,e1);
+    auto target = shortcut ? nullptr : implDispatch(receiver,e1);
+    // A modal handler may already have released this key, or pressed it again.
+    auto it = keyUp.find(scancode);
+    if(it==keyUp.end() || it->second.pending!=press)
+      return true;
+    if(shortcut || target) {
+      it->second = {target,0};
+      return true;
+      }
+    return false;
+    };
 
-  if(implShortcut(wnd,e1))
-    return;
-  k = implDispatch(wnd,e1);
-  keyUp[scancode] = k;
+  for(auto i:overlays)
+    if(i->bind(wnd) && deliver(*i))
+      return;
+  if(!deliver(wnd))
+    keyUp.at(scancode).pending = 0;
   }
 
 void EventDispatcher::dispatchKeyUp(Widget &/*wnd*/, KeyEvent &e, uint32_t scancode) {
@@ -196,7 +204,7 @@ void EventDispatcher::dispatchKeyUp(Widget &/*wnd*/, KeyEvent &e, uint32_t scanc
   KeyEvent e1(e.key,e.code,mkModifier(),e.type());
   handleModKey(e);
 
-  auto w = lock(it->second);
+  auto w = lock(it->second.target);
   keyUp.erase(it);
   if(!w)
     return;
