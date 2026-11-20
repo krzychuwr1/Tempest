@@ -79,7 +79,14 @@ class UploadEngine final {
   public:
     UploadEngine(Device& dev):device(dev){}
     ~UploadEngine() {
-      wait();
+      // Settle every command, including during teardown of a lost Vulkan device.
+      for(auto& entry:cmd) {
+        try {
+          entry->wait();
+          }
+        catch(const DeviceLostException&) {
+          }
+        }
       }
 
     using Commands = TransferCmd<CommandBuffer>;

@@ -3,6 +3,8 @@
 #include <Tempest/AbstractGraphicsApi>
 #include <Tempest/RenderState>
 #include <Tempest/AccelerationStructure>
+#include <chrono>
+#include <thread>
 #include <stdexcept>
 #include <string>
 
@@ -28,6 +30,18 @@ namespace Tempest {
 namespace Detail {
 
 class VTexture;
+
+// None of the resources protected by a blocking wait can be released on a transient
+// allocation error. Callers choose the lock scope for each attempt.
+template<class Wait>
+VkResult retryVulkanWait(Wait wait) {
+  for(;;) {
+    const VkResult result = wait();
+    if(result!=VK_ERROR_OUT_OF_HOST_MEMORY && result!=VK_ERROR_OUT_OF_DEVICE_MEMORY)
+      return result;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
 
 inline void vkAssert(VkResult code){
   if(T_LIKELY(code==VK_SUCCESS))

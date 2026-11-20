@@ -1,4 +1,5 @@
 #include "fence.h"
+#include <Tempest/Except>
 
 using namespace Tempest;
 
@@ -7,8 +8,11 @@ Fence::Fence(std::shared_ptr<AbstractGraphicsApi::Fence>& f)
   }
 
 Fence::~Fence() {
-  if(impl != nullptr)  {
-    impl->wait();
+  try {
+    wait();
+    }
+  catch(const DeviceLostException&) {
+    // Terminal waits retire resource use. Explicit wait() still reports the loss.
     }
   }
 

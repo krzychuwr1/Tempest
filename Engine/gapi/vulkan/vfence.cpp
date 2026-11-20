@@ -3,22 +3,10 @@
 #include "vfence.h"
 #include "vdevice.h"
 
-#include <chrono>
-#include <thread>
-
 using namespace Tempest::Detail;
 
 void VFence::wait() {
-  for(;;) {
-    const auto status = device->waitFence(*this,std::numeric_limits<uint64_t>::max());
-    if(status!=VK_ERROR_OUT_OF_HOST_MEMORY && status!=VK_ERROR_OUT_OF_DEVICE_MEMORY) {
-      vkAssert(status);
-      return;
-      }
-    // A blocking wait also protects the command buffer and its staging resources.
-    // Retry outside the timeline lock so unrelated completed fences can be recycled.
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+  vkAssert(retryVulkanWait([&] { return device->waitFence(*this,std::numeric_limits<uint64_t>::max()); }));
   }
 
 bool VFence::wait(uint64_t time) {

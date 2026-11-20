@@ -107,7 +107,7 @@ VDevice::VDevice(VkInstance instance, const bool hasDeviceFeatures2, VkPhysicalD
   }
 
 VDevice::~VDevice() {
-  vkDeviceWaitIdle(device.impl);
+  waitIdle();
   data.reset();
 
   for(auto& i:timeline.timepoint) {
@@ -1104,7 +1104,9 @@ void VDevice::waitIdle() {
 
 void VDevice::waitIdleSync(VDevice::Queue* q, size_t n) {
   if(n==0) {
-    vkDeviceWaitIdle(device.impl);
+    const auto result = retryVulkanWait([&] { return vkDeviceWaitIdle(device.impl); });
+    if(result!=VK_ERROR_DEVICE_LOST)
+      vkAssert(result);
     return;
     }
   if(q->impl!=nullptr) {
@@ -1135,6 +1137,15 @@ std::shared_ptr<VFence> VDevice::submit(VCommandBuffer& cmd) {
       throw DeviceLostException();
     try {
       enqueue(fence->fence);
+      }
+    catch(const DeviceLostException&) {
+      // A device-lost submit can still own the command buffer. A terminal wait
+      // retires its use before the caller unwinds the submission operands.
+      const auto result = retryVulkanWait([&] { return vkWaitForFences(device.impl,1,&fence->fence,VK_TRUE,UINT64_MAX); });
+      fence->setStatus(VK_ERROR_DEVICE_LOST);
+      if(result!=VK_ERROR_DEVICE_LOST)
+        vkAssert(result);
+      throw;
       }
     catch(...) {
       // No submitted work will signal this reservation.
