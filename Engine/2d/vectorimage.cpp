@@ -190,6 +190,8 @@ void VectorImage::Mesh::update(Device& dev, const VectorImage& src, BufferHeap h
 
     auto& p = src.pipelineOf(dev,b);
     ux.pipeline = &p;
+    ux.topology = b.tp;
+    ux.blend    = b.blend;
 
     if(T_LIKELY(b.hasImg())) {
       Sampler s = Sampler::bilinear();
@@ -214,13 +216,23 @@ void VectorImage::Mesh::update(Device& dev, const VectorImage& src, BufferHeap h
     }
   }
 
-void VectorImage::Mesh::draw(Encoder<CommandBuffer>& cmd) const {
+void VectorImage::Mesh::draw(Encoder<CommandBuffer>& cmd, const Builtin::Transmittance* transmittance) const {
   for(size_t i=0;i<blocks.size();++i){
     auto& b = blocks[i];
     if(b.size==0)
       continue;
 
-    if(b.texture) {
+    auto pipeline = b.pipeline;
+    if(transmittance!=nullptr) {
+      if(b.blend==Add)
+        continue;
+      const size_t i = b.topology==Triangles ? 0u : 1u;
+      if(b.blend==NoBlend)
+        pipeline = &transmittance->replace[i];
+      else
+        pipeline = b.texture ? &transmittance->texturedAlpha[i] : &transmittance->solidAlpha[i];
+      }
+    if(b.texture && (transmittance==nullptr || b.blend==Alpha)) {
       ComponentMapping mapping;
       if(T_UNLIKELY(b.format==TextureFormat::R8 || b.format==TextureFormat::R16 || b.format==TextureFormat::R32F)) {
         mapping.r = ComponentSwizzle::R;
@@ -235,7 +247,7 @@ void VectorImage::Mesh::draw(Encoder<CommandBuffer>& cmd) const {
         }
       cmd.setBinding(0, b.texture, mapping, b.smp);
       }
-    cmd.setPipeline(*b.pipeline);
+    cmd.setPipeline(*pipeline);
     cmd.draw(vbo,b.begin,b.size);
     }
   }

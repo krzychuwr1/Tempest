@@ -25,6 +25,11 @@ class Builtin final {
       Tempest::RenderPipeline brushA;
       };
 
+    struct Transmittance {
+      explicit Transmittance(Device& device);
+      RenderPipeline replace[2], solidAlpha[2], texturedAlpha[2]; // triangles, lines
+      };
+
     const Item& texture2d() const { return brushT2; }
     const Item& empty    () const { return brushE;  }
 

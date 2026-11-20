@@ -48,3 +48,22 @@ Builtin::Item Builtin::mkShaderSet(bool textures) {
   ret.brushA = device.pipeline(Triangles,stAlpha,vs,fs);
   return ret;
   }
+
+Builtin::Transmittance::Transmittance(Device& device) {
+  const auto solidVs = device.shader(empty_vert_sprv, sizeof(empty_vert_sprv));
+  const auto solidFs = device.shader(empty_frag_sprv, sizeof(empty_frag_sprv));
+  const auto texVs   = device.shader(tex_brush_vert_sprv, sizeof(tex_brush_vert_sprv));
+  const auto texFs   = device.shader(tex_brush_frag_sprv, sizeof(tex_brush_frag_sprv));
+  RenderState overwrite;
+  overwrite.setZWriteEnabled(false);
+  overwrite.setBlendSource(RenderState::BlendMode::Zero);
+  overwrite.setBlendDest(RenderState::BlendMode::Zero);
+  auto alpha = overwrite;
+  alpha.setBlendDest(RenderState::BlendMode::OneMinusSrcAlpha);
+  for(size_t i=0; i<2; ++i) {
+    const auto topology = i==0 ? Triangles : Lines;
+    replace[i]       = device.pipeline(topology,overwrite,solidVs,solidFs);
+    solidAlpha[i]    = device.pipeline(topology,alpha,solidVs,solidFs);
+    texturedAlpha[i] = device.pipeline(topology,alpha,texVs,texFs);
+    }
+  }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Tempest/PaintDevice>
+#include <Tempest/Builtin>
 #include <Tempest/VertexBuffer>
 #include <Tempest/Rect>
 #include <Tempest/Sprite>
@@ -19,7 +20,9 @@ class VectorImage : public Tempest::PaintDevice {
     class Mesh {
       public:
         void update(Device& dev, const VectorImage& src, BufferHeap heap = BufferHeap::Upload);
-        void draw  (Encoder<CommandBuffer>& cmd) const;
+        bool isEmpty() const { return vbo.size()==0; }
+        // Clear the target to white to measure the fraction of background colour left by the mesh.
+        void draw(Encoder<CommandBuffer>& cmd, const Builtin::Transmittance* transmittance = nullptr) const;
 
       private:
         struct Block {
@@ -27,6 +30,8 @@ class VectorImage : public Tempest::PaintDevice {
           size_t                size  = 0;
 
           const RenderPipeline* pipeline = nullptr;
+          Topology              topology = Triangles;
+          Blend                 blend = NoBlend;
           Sampler               smp;
           TexPtr                texture;
           TextureFormat         format = TextureFormat::R8;
