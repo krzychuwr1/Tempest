@@ -69,6 +69,9 @@ class RenderState final {
     void      setZWriteEnabled(bool e) { zdiscard=!e; }
     bool      isZWriteEnabled() const { return !zdiscard; }
 
+    void      setShadingRateAttachmentEnabled(bool enable) { shadingRateAttachment = enable; }
+    bool      isShadingRateAttachmentEnabled() const { return shadingRateAttachment; }
+
     CullMode  cullFaceMode() const { return cull; }
     void      setCullFaceMode(CullMode use) { cull=use; }
 
@@ -80,6 +83,7 @@ class RenderState final {
     CullMode  cull     = CullMode::Back;
     bool      discard  = false;
     bool      zdiscard = false;
+    bool      shadingRateAttachment = false;
   };
 
 }

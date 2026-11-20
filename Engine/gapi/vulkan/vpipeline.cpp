@@ -83,18 +83,18 @@ VPipeline::~VPipeline() {
   cleanup();
   }
 
-VkPipeline VPipeline::instance(const VkPipelineRenderingCreateInfoKHR& info, VkRenderPass pass, VkPipelineLayout pLay, size_t stride) {
+VkPipeline VPipeline::instance(const VkPipelineRenderingCreateInfoKHR& info, VkRenderPass pass, VkPipelineLayout pLay, size_t stride, bool rateAttachment) {
   std::lock_guard<SpinLock> guard(syncInst);
 
   for(auto& i:instDr)
-    if(i.isCompatible(info,pLay,stride))
+    if(i.rateAttachment==rateAttachment && i.isCompatible(info,pLay,stride))
       return i.val;
   VkPipeline val = VK_NULL_HANDLE;
   try {
-    val = initGraphicsPipeline(device,pLay,pass,&info,st,
+    val = initGraphicsPipeline(device,pLay,pass,&info,rateAttachment,st,
                                decl.get(),declSize,stride,
                                tp,modules);
-    instDr.emplace_back(info,pLay,stride,val);
+    instDr.emplace_back(info,pLay,stride,rateAttachment,val);
     }
   catch(...) {
     if(val!=VK_NULL_HANDLE)
@@ -129,7 +129,7 @@ void VPipeline::cleanup() {
 
 VkPipeline VPipeline::initGraphicsPipeline(VDevice& device,
                                            VkPipelineLayout layout, const VkRenderPass rpass,
-                                           const VkPipelineRenderingCreateInfoKHR* dynLay,
+                                           const VkPipelineRenderingCreateInfoKHR* dynLay, bool rateAttachment,
                                            const RenderState &st,
                                            const Decl::ComponentType *decl, size_t declSize,
                                            size_t stride, Topology tp,
@@ -309,6 +309,19 @@ VkPipeline VPipeline::initGraphicsPipeline(VDevice& device,
     pipelineInfo.renderPass = rpass;
     } else {
     pipelineInfo.pNext      = dynLay;
+    }
+
+  VkPipelineFragmentShadingRateStateCreateInfoKHR rate = {VK_STRUCTURE_TYPE_PIPELINE_FRAGMENT_SHADING_RATE_STATE_CREATE_INFO_KHR};
+  if(rateAttachment) {
+    pipelineInfo.flags |= VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+    createFlags2.flags |= VK_PIPELINE_CREATE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR;
+    if(st.isShadingRateAttachmentEnabled()) {
+      rate.fragmentSize   = {1,1};
+      rate.combinerOps[0] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_KEEP_KHR;
+      rate.combinerOps[1] = VK_FRAGMENT_SHADING_RATE_COMBINER_OP_REPLACE_KHR;
+      rate.pNext = pipelineInfo.pNext;
+      pipelineInfo.pNext = &rate;
+      }
     }
 
   if(device.props.hasDescriptorHeap) {

@@ -2,6 +2,7 @@
 
 #include <Tempest/AbstractGraphicsApi>
 #include "vulkan_sdk.h"
+#include "../vulkaninterop.h"
 
 #include "gapi/vulkan/vcommandpool.h"
 #include "gapi/vulkan/vframebuffermap.h"
@@ -46,6 +47,7 @@ class VCommandBuffer:public AbstractGraphicsApi::CommandBuffer {
 
     void beginRendering(const Detail::FrameBufferDesc& fbo, size_t fboSize, uint32_t w, uint32_t h) override;
     void endRendering() override;
+    void setNextShadingRate(const VulkanShadingRateAttachment& rate) { nextRate = rate; }
 
     void setViewport(const Rect& r) override;
     void setScissor (const Rect& r) override;
@@ -144,6 +146,9 @@ class VCommandBuffer:public AbstractGraphicsApi::CommandBuffer {
     ResourceState                           resState;
     std::shared_ptr<VFramebufferMap::RenderPass> passRp;
     PipelineInfo                            passDyn = {};
+    VulkanShadingRateAttachment             nextRate;
+    bool                                    passHasRate = false;
+    void                                    uploadShadingRate(const VulkanShadingRateAttachment& rate);
 
     Push                                    pushData;
     Bindings                                bindings;

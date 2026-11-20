@@ -12,6 +12,8 @@ namespace Tempest {
 class Device;
 class Attachment;
 class ZBuffer;
+class CommandBuffer;
+template<class T> class Encoder;
 enum TextureFormat : uint8_t;
 
 // Lets an external runtime (such as OpenXR) create the Vulkan instance and device.
@@ -57,5 +59,16 @@ ZBuffer             vulkanBorrowDepthAttachment(Device& device, VkImage image, u
 Attachment          vulkanBorrowLayeredAttachment(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format, uint32_t layers);
 ZBuffer             vulkanBorrowLayeredDepth(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format, uint32_t layers);
 void                vulkanSetViewMask(uint32_t mask);
+
+// Upload one byte per rate texel before the next framebuffer in this encoder. The caller
+// retains the buffer, image and view until the submitted command buffer has completed.
+struct VulkanShadingRateAttachment {
+  VkBuffer   source = VK_NULL_HANDLE;
+  VkImage    image  = VK_NULL_HANDLE;
+  VkImageView view  = VK_NULL_HANDLE;
+  VkExtent2D extent = {};
+  VkExtent2D texel  = {};
+  };
+void vulkanSetNextShadingRate(Encoder<CommandBuffer>& enc, const VulkanShadingRateAttachment& rate);
 
 }

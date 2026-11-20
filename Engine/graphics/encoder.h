@@ -17,6 +17,7 @@ template<class T>
 class IndexBuffer;
 
 class CommandBuffer;
+struct VulkanShadingRateAttachment;
 
 template<class T>
 class Encoder;
@@ -144,6 +145,7 @@ class Encoder<Tempest::CommandBuffer> {
     void         implBindBuffer(size_t id, const Detail::VideoBuffer& buf);
 
   friend class CommandBuffer;
+  friend void vulkanSetNextShadingRate(Encoder<CommandBuffer>&, const VulkanShadingRateAttachment&);
   };
 }
 

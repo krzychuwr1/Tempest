@@ -44,7 +44,7 @@ class VPipeline : public AbstractGraphicsApi::Pipeline {
     VkPipelineLayout   pipelineLayout = VK_NULL_HANDLE;
     uint32_t           defaultStride  = 0;
 
-    VkPipeline         instance(const VkPipelineRenderingCreateInfoKHR& info, VkRenderPass pass, VkPipelineLayout pLay, size_t stride);
+    VkPipeline         instance(const VkPipelineRenderingCreateInfoKHR& info, VkRenderPass pass, VkPipelineLayout pLay, size_t stride, bool rateAttachment);
 
     IVec3              workGroupSize() const override;
     size_t             sizeofBuffer(size_t id, size_t arraylen) const override;
@@ -58,10 +58,11 @@ class VPipeline : public AbstractGraphicsApi::Pipeline {
       };
 
     struct InstDr : Inst {
-      InstDr(const VkPipelineRenderingCreateInfoKHR& lay, VkPipelineLayout pLay, size_t stride, VkPipeline val):Inst(val,pLay,stride),lay(lay){
+      InstDr(const VkPipelineRenderingCreateInfoKHR& lay, VkPipelineLayout pLay, size_t stride, bool rate, VkPipeline val):Inst(val,pLay,stride),lay(lay),rateAttachment(rate){
         std::memcpy(colorFrm, lay.pColorAttachmentFormats, lay.colorAttachmentCount*sizeof(VkFormat));
         }
       VkPipelineRenderingCreateInfoKHR lay;
+      bool                             rateAttachment;
       VkFormat                         colorFrm[MaxFramebufferAttachments] = {};
 
       bool                             isCompatible(const VkPipelineRenderingCreateInfoKHR& dr, VkPipelineLayout pLay, size_t stride) const;
@@ -83,7 +84,7 @@ class VPipeline : public AbstractGraphicsApi::Pipeline {
     void                                   cleanup();
 
     VkPipeline                   initGraphicsPipeline(VDevice& device, VkPipelineLayout layout,
-                                                      const VkRenderPass rpass, const VkPipelineRenderingCreateInfoKHR* dynLay, const RenderState &st,
+                                                      const VkRenderPass rpass, const VkPipelineRenderingCreateInfoKHR* dynLay, bool rateAttachment, const RenderState &st,
                                                       const Decl::ComponentType *decl, size_t declSize, size_t stride,
                                                       Topology tp,
                                                       const DSharedPtr<const VShader*>* shaders);

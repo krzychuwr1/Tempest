@@ -7,6 +7,7 @@
 #include "../vulkaninterop.h"
 
 #include <Tempest/Attachment>
+#include <Tempest/Encoder>
 
 #include "vdevice.h"
 #include "vcommandpool.h"
@@ -297,6 +298,7 @@ void VCommandBuffer::profCollect() {
   }
 
 void VCommandBuffer::begin(SyncHint hint) {
+  nextRate = {};
   state  = Idle;
   curVbo = VK_NULL_HANDLE;
   pushData.size  = 0;
@@ -367,6 +369,33 @@ void Tempest::vulkanSetViewMask(uint32_t mask) {
   nextViewMask.store(mask);
   }
 
+void Tempest::vulkanSetNextShadingRate(Encoder<CommandBuffer>& enc, const VulkanShadingRateAttachment& rate) {
+  static_cast<VCommandBuffer*>(enc.impl)->setNextShadingRate(rate);
+  }
+
+void VCommandBuffer::uploadShadingRate(const VulkanShadingRateAttachment& rate) {
+  VkImageMemoryBarrier barrier = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+  barrier.image               = rate.image;
+  barrier.subresourceRange    = {VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.oldLayout           = VK_IMAGE_LAYOUT_UNDEFINED;
+  barrier.newLayout           = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+  barrier.dstAccessMask       = VK_ACCESS_TRANSFER_WRITE_BIT;
+  vkCmdPipelineBarrier(impl,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,
+                       0,0,nullptr,0,nullptr,1,&barrier);
+  VkBufferImageCopy region = {};
+  region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT,0,0,1};
+  region.imageExtent      = {rate.extent.width,rate.extent.height,1};
+  vkCmdCopyBufferToImage(impl,rate.source,rate.image,barrier.newLayout,1,&region);
+  barrier.oldLayout     = barrier.newLayout;
+  barrier.newLayout     = VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
+  barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+  barrier.dstAccessMask = VK_ACCESS_FRAGMENT_SHADING_RATE_ATTACHMENT_READ_BIT_KHR;
+  vkCmdPipelineBarrier(impl,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADING_RATE_ATTACHMENT_BIT_KHR,
+                       0,0,nullptr,0,nullptr,1,&barrier);
+  }
+
 void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, uint32_t width, uint32_t height) {
   resState.beginRendering(*this,fbo);
   if(state==Idle) {
@@ -395,6 +424,17 @@ void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, 
     info.viewMask             = nextViewMask.load(); // multiview (vulkanSetViewMask)
     info.colorAttachmentCount = 0;
     info.pColorAttachments    = colorAtt;
+
+    VkRenderingFragmentShadingRateAttachmentInfoKHR rateInfo = {VK_STRUCTURE_TYPE_RENDERING_FRAGMENT_SHADING_RATE_ATTACHMENT_INFO_KHR};
+    passHasRate = nextRate.view!=VK_NULL_HANDLE && device.vkCmdBeginRenderingKHR!=nullptr;
+    if(passHasRate) {
+      uploadShadingRate(nextRate);
+      rateInfo.imageView = nextRate.view;
+      rateInfo.imageLayout = VK_IMAGE_LAYOUT_FRAGMENT_SHADING_RATE_ATTACHMENT_OPTIMAL_KHR;
+      rateInfo.shadingRateAttachmentTexelSize = nextRate.texel;
+      info.pNext = &rateInfo;
+      }
+    nextRate = {};
 
     passDyn.sType                   = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
     passDyn.pNext                   = nullptr;
@@ -467,6 +507,7 @@ void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, 
 
 void VCommandBuffer::endRendering() {
   vkCmdEndRenderingKHR(impl);
+  passHasRate = false;
   resState.onUavUsage(bindings.read, bindings.write, PipelineStage::S_Graphics, bindings.host);
   resState.flush(*this);
   resState.endRendering(*this);
@@ -494,7 +535,7 @@ void VCommandBuffer::setPipeline(AbstractGraphicsApi::Pipeline& p) {
     const auto prevPushSize = curDrawPipeline ? curDrawPipeline->pb.size : 0;
 
     auto rp   = (passRp!=nullptr ? passRp->pass : VK_NULL_HANDLE);
-    auto inst = px.instance(passDyn, rp, VK_NULL_HANDLE, px.defaultStride);
+    auto inst = px.instance(passDyn, rp, VK_NULL_HANDLE, px.defaultStride, passHasRate);
     vkCmdBindPipeline(impl, VK_PIPELINE_BIND_POINT_GRAPHICS, inst);
 
     pushData.durty  = pushData.durty || px.pb.size!=prevPushSize;
@@ -688,7 +729,7 @@ void VCommandBuffer::implSetUniforms(const PipelineStage st) {
     pipelineLayout = pLay;
     auto& pso  = *curDrawPipeline;
     auto  rp   = (passRp!=nullptr ? passRp->pass : VK_NULL_HANDLE);
-    auto  inst = pso.instance(passDyn, rp, pipelineLayout, vboStride);
+    auto  inst = pso.instance(passDyn, rp, pipelineLayout, vboStride, passHasRate);
     vkCmdBindPipeline(impl, bindPoint, inst);
     pushData.durty = true;
     }
