@@ -301,20 +301,20 @@ struct Tempest::Detail::VulkanInteropAccess {
     return {d->instance, d->physicalDevice, d->device.impl, d->graphicsQueue->impl,
             d->graphicsQueue->family, &d->graphicsQueue->sync};
     }
-  static Attachment borrow(Tempest::Device& source, VkImage image, uint32_t w, uint32_t h, TextureFormat frm) {
+  static Attachment borrow(Tempest::Device& source, VkImage image, uint32_t w, uint32_t h, TextureFormat frm, uint32_t layers = 1) {
     auto* d = dynamic_cast<VDevice*>(source.dev);
     if(d==nullptr || image==VK_NULL_HANDLE)
       throw std::system_error(Tempest::GraphicsErrc::NoDevice);
-    VTexture tex(*d, image, nativeFormat(frm));
+    VTexture tex(*d, image, nativeFormat(frm), layers);
     AbstractGraphicsApi::PTexture impl(new VTextureWithFbo(std::move(tex)));
     return Attachment(Texture2d(std::move(impl), w, h, 1, frm));
     }
 
-  static ZBuffer borrowDepth(Tempest::Device& source, VkImage image, uint32_t w, uint32_t h, TextureFormat frm) {
+  static ZBuffer borrowDepth(Tempest::Device& source, VkImage image, uint32_t w, uint32_t h, TextureFormat frm, uint32_t layers = 1) {
     auto* d = dynamic_cast<VDevice*>(source.dev);
     if(d==nullptr || image==VK_NULL_HANDLE)
       throw std::system_error(Tempest::GraphicsErrc::NoDevice);
-    VTexture tex(*d, image, nativeFormat(frm));
+    VTexture tex(*d, image, nativeFormat(frm), layers);
     AbstractGraphicsApi::PTexture impl(new VTextureWithFbo(std::move(tex)));
     return ZBuffer(Texture2d(std::move(impl), w, h, 1, frm), true);
     }
@@ -346,6 +346,14 @@ Attachment Tempest::vulkanBorrowColorAttachment(Device& device, VkImage image, u
 
 ZBuffer Tempest::vulkanBorrowDepthAttachment(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format) {
   return Detail::VulkanInteropAccess::borrowDepth(device, image, width, height, format);
+  }
+
+Attachment Tempest::vulkanBorrowLayeredAttachment(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format, uint32_t layers) {
+  return Detail::VulkanInteropAccess::borrow(device, image, width, height, format, layers);
+  }
+
+ZBuffer Tempest::vulkanBorrowLayeredDepth(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format, uint32_t layers) {
+  return Detail::VulkanInteropAccess::borrowDepth(device, image, width, height, format, layers);
   }
 
 AbstractGraphicsApi::Swapchain *VulkanApi::createSwapchain(SystemApi::Window *w, AbstractGraphicsApi::Device *d) {

@@ -307,6 +307,12 @@ void VDevice::createLogicalDevice(VkPhysicalDevice pdev) {
       features.pNext = &dheapFeatures;
       }
 
+    // Multiview (core in Vulkan 1.1): XR draws both eyes in one pass where it can
+    VkPhysicalDeviceMultiviewFeatures multiviewFeatures = {};
+    multiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES;
+    multiviewFeatures.pNext = features.pNext;
+    features.pNext = &multiviewFeatures;
+
     auto vkGetPhysicalDeviceFeatures2 = PFN_vkGetPhysicalDeviceFeatures2(vkGetInstanceProcAddr(instance,"vkGetPhysicalDeviceFeatures2KHR"));
 
     vkGetPhysicalDeviceFeatures2(pdev, &features);
@@ -321,6 +327,8 @@ void VDevice::createLogicalDevice(VkPhysicalDevice pdev) {
     robustness2Features.robustImageAccess2 = VK_FALSE;
 
     meshFeatures.multiviewMeshShader                    = VK_FALSE; // requires VkPhysicalDeviceMultiviewFeaturesKHR::multiview
+    multiviewFeatures.multiviewGeometryShader     = VK_FALSE;
+    multiviewFeatures.multiviewTessellationShader = VK_FALSE;
     meshFeatures.primitiveFragmentShadingRateMeshShader = VK_FALSE; // requires vrs
 
     createInfo.pNext            = &features;

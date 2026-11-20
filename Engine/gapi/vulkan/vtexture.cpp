@@ -22,6 +22,7 @@ VTexture::VTexture(VTexture&& other) {
   std::swap(is3D,           other.is3D);
   std::swap(isFilterable,   other.isFilterable);
   std::swap(borrowed,       other.borrowed);
+  std::swap(layers,         other.layers);
   std::swap(extViews,       other.extViews);
   std::swap(extDescr,       other.extDescr);
   }
@@ -32,8 +33,8 @@ static NonUniqResId borrowedSyncId() {
   return NonUniqResId(1u << (i.fetch_add(1) % 32));
   }
 
-VTexture::VTexture(VDevice& device, VkImage image, VkFormat viewFormat)
-  :impl(image), format(viewFormat), nonUniqId(borrowedSyncId()), alloc(&device.allocator), borrowed(true) {
+VTexture::VTexture(VDevice& device, VkImage image, VkFormat viewFormat, uint32_t layerCount)
+  :impl(image), format(viewFormat), nonUniqId(borrowedSyncId()), alloc(&device.allocator), borrowed(true), layers(layerCount) {
   createViews(device.device.impl);
   }
 
@@ -154,7 +155,7 @@ VkImageViewCreateInfo VTexture::createInfo(const ComponentMapping* cmap, uint32_
   VkImageViewCreateInfo viewInfo = {};
   viewInfo.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
   viewInfo.image    = impl;
-  viewInfo.viewType = is3D ? VK_IMAGE_VIEW_TYPE_3D : VK_IMAGE_VIEW_TYPE_2D;
+  viewInfo.viewType = is3D ? VK_IMAGE_VIEW_TYPE_3D : (layers>1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D);
   viewInfo.format   = format;
 
   if(cmap!=nullptr) {
@@ -178,7 +179,7 @@ VkImageViewCreateInfo VTexture::createInfo(const ComponentMapping* cmap, uint32_
   viewInfo.subresourceRange.baseMipLevel   = (mipLevel==uint32_t(-1) ? 0      : mipLevel);
   viewInfo.subresourceRange.levelCount     = (mipLevel==uint32_t(-1) ? mipCnt :        1);
   viewInfo.subresourceRange.baseArrayLayer = 0;
-  viewInfo.subresourceRange.layerCount     = 1;
+  viewInfo.subresourceRange.layerCount     = layers;
   return viewInfo;
   }
 

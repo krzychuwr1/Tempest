@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #if defined(TEMPEST_BUILD_VULKAN)
 
@@ -360,6 +361,12 @@ bool VCommandBuffer::isRecording() const {
   return state!=NoRecording;
   }
 
+static std::atomic<uint32_t> nextViewMask{0};
+
+void Tempest::vulkanSetViewMask(uint32_t mask) {
+  nextViewMask.store(mask);
+  }
+
 void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, uint32_t width, uint32_t height) {
   resState.beginRendering(*this,fbo);
   if(state==Idle) {
@@ -385,7 +392,7 @@ void VCommandBuffer::beginRendering(const FrameBufferDesc& fbo, size_t fboSize, 
     info.renderArea.offset    = {0, 0};
     info.renderArea.extent    = {width,height};
     info.layerCount           = 1;
-    info.viewMask             = 0;
+    info.viewMask             = nextViewMask.load(); // multiview (vulkanSetViewMask)
     info.colorAttachmentCount = 0;
     info.pColorAttachments    = colorAtt;
 
