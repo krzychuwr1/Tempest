@@ -19,9 +19,11 @@ struct SoundEffect::Impl {
     };
 
   Impl() = default;
+  explicit Impl(SoundDevice& device):dev(&device) {}
 
   Impl(SoundDevice &dev, const Sound &src)
-      :dev(&dev), data(src.data) {
+      :Impl(dev) {
+    data = src.data;
     if(data==nullptr)
       return;
     ALCcontext* ctx  = context();
@@ -31,54 +33,51 @@ struct SoundEffect::Impl {
     ALsizei     size = src.data->byteSize;
 
     alGenBuffersDirect(ctx, 1, &stream);
+    if(alGetErrorDirect(ctx)!=AL_NO_ERROR)
+      throw std::bad_alloc();
     alBufferDataStaticDirect(ctx, stream, frm, data, size, freq);
-    if(alGetErrorDirect(ctx)!=AL_NO_ERROR) {
-      throw std::bad_alloc();
-      }
-
-    alGenSourcesDirect(ctx, 1, &source);
-    if(alGetErrorDirect(ctx)!=AL_NO_ERROR) {
-      alDeleteBuffersDirect(ctx, 1, &stream);
-      throw std::bad_alloc();
-      }
-
-    alSourceiDirect(ctx, source, AL_BUFFER, stream);
-    alSourcefDirect(ctx, source, AL_REFERENCE_DISTANCE, 0);
+    attachSource(ctx);
     }
 
   Impl(SoundDevice &dev, std::unique_ptr<SoundProducer> &&psrc)
-    :dev(&dev), data(nullptr), producer(std::move(psrc)) {
+    :Impl(dev) {
+    producer = std::move(psrc);
+    if(!producer)
+      return;
     SoundProducer& src  = *producer;
     ALsizei        freq = src.frequency;
     ALenum         frm  = src.channels==2 ? AL_FORMAT_STEREO16 : AL_FORMAT_MONO16;
     ALCcontext*    ctx  = reinterpret_cast<ALCcontext*>(dev.context());
 
     alGenBuffersDirect(ctx, 1, &stream);
+    if(alGetErrorDirect(ctx)!=AL_NO_ERROR)
+      throw std::bad_alloc();
     alBufferCallbackDirectSOFT(ctx, stream, frm, freq, bufferCallback, this);
-    if(alGetErrorDirect(ctx)!=AL_NO_ERROR) {
-      throw std::bad_alloc();
-      }
+    attachSource(ctx);
+    }
 
+  void attachSource(ALCcontext* ctx) {
+    if(alGetErrorDirect(ctx)!=AL_NO_ERROR)
+      throw std::bad_alloc();
     alGenSourcesDirect(ctx, 1, &source);
-    if(alGetErrorDirect(ctx)!=AL_NO_ERROR) {
-      alDeleteBuffersDirect(ctx, 1, &stream);
+    if(alGetErrorDirect(ctx)!=AL_NO_ERROR)
       throw std::bad_alloc();
-      }
-
     alSourceiDirect(ctx, source, AL_BUFFER, stream);
     alSourcefDirect(ctx, source, AL_REFERENCE_DISTANCE, 0);
+    if(alGetErrorDirect(ctx)!=AL_NO_ERROR)
+      throw std::bad_alloc();
     }
 
   ~Impl() {
-    if(source==0)
+    if(source==0 && stream==0)
       return;
-
-    auto* ctx = reinterpret_cast<ALCcontext*>(dev->context());
-    alSourcePausevDirect(ctx, 1, &source);
-    alDeleteSourcesDirect(ctx, 1, &source);
-    if(stream!=0) {
-      alDeleteBuffersDirect(ctx, 1, &stream);
+    auto* ctx = context();
+    if(source!=0) {
+      alSourcePausevDirect(ctx, 1, &source);
+      alDeleteSourcesDirect(ctx, 1, &source);
       }
+    if(stream!=0)
+      alDeleteBuffersDirect(ctx, 1, &stream);
     }
 
   static ALsizei bufferCallback(ALvoid *userptr, ALvoid *sampledata, ALsizei numbytes) noexcept {
