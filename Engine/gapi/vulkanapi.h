@@ -3,10 +3,16 @@
 #include "abstractgraphicsapi.h"
 
 #include <memory>
+#include <string>
 #include <cstdint>
 #include <vector>
 
 namespace Tempest {
+
+// Timestamp-query profiling, independent of the native Vulkan interop API.
+void        vulkanSetGpuProfiling(bool enabled);
+bool        vulkanGpuProfiling();
+std::string vulkanGpuProfileReport();
 
 class VulkanApi : public AbstractGraphicsApi {
   public:

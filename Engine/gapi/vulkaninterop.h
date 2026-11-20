@@ -1,5 +1,6 @@
 #pragma once
 
+#include "vulkanapi.h"
 #include "vulkan/vulkan_sdk.h"
 
 #include <cstdint>
@@ -44,11 +45,6 @@ struct VulkanNativeImage {
 
 VulkanNativeContext vulkanNativeContext(Device& device);
 
-// GPU time per debug-marker region, measured with timestamp queries while enabled.
-// The report lists average milliseconds per command buffer since the previous report.
-void        vulkanSetGpuProfiling(bool enabled);
-bool        vulkanGpuProfiling();
-std::string vulkanGpuProfileReport();
 VulkanNativeImage   vulkanNativeImage(const Attachment& image);
 // Render target over an external RGBA8-compatible colour image (created with a mutable format,
 // such as an sRGB OpenXR swapchain image), viewed as R8G8B8A8_UNORM so values are written as they are
