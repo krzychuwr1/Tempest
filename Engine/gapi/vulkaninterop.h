@@ -12,6 +12,7 @@ namespace Tempest {
 class Device;
 class Attachment;
 class ZBuffer;
+class Pixmap;
 class CommandBuffer;
 template<class T> class Encoder;
 enum TextureFormat : uint8_t;
@@ -57,6 +58,8 @@ ZBuffer             vulkanBorrowDepthAttachment(Device& device, VkImage image, u
 // Select the upper-left render area of a borrowed image within its original extent.
 void                vulkanSetBorrowedExtent(Attachment& image, uint32_t width, uint32_t height);
 void                vulkanSetBorrowedExtent(ZBuffer& image, uint32_t width, uint32_t height);
+// Read the depth aspect of a D32F target created with transfer-source usage.
+Pixmap              vulkanReadDepth32F(Device& device, const ZBuffer& image);
 // Multiview: render targets over external images with several array layers (one per view),
 // and the view mask of the render passes begun next (0: ordinary single-view rendering)
 Attachment          vulkanBorrowLayeredAttachment(Device& device, VkImage image, uint32_t width, uint32_t height, TextureFormat format, uint32_t layers);

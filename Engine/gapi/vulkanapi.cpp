@@ -336,6 +336,12 @@ struct Tempest::Detail::VulkanInteropAccess {
       return {};
     return {img->impl, img->format, img->defaultLayout()};
     }
+
+  static Pixmap readDepth32F(Device& device,const ZBuffer& image) {
+    if(image.format()!=TextureFormat::Depth32F)
+      throw std::invalid_argument("Expected D32F depth for Vulkan readback");
+    return device.readPixels(image.tImpl);
+    }
   };
 
 VulkanNativeContext Tempest::vulkanNativeContext(Tempest::Device& device) {
@@ -352,6 +358,10 @@ void Tempest::vulkanSetBorrowedExtent(Attachment& image, uint32_t width, uint32_
 
 void Tempest::vulkanSetBorrowedExtent(ZBuffer& image, uint32_t width, uint32_t height) {
   Detail::VulkanInteropAccess::setExtent(image,width,height);
+  }
+
+Pixmap Tempest::vulkanReadDepth32F(Device& device, const ZBuffer& image) {
+  return Detail::VulkanInteropAccess::readDepth32F(device,image);
   }
 
 Attachment Tempest::vulkanBorrowColorAttachment(Device& device, VkImage image, uint32_t width, uint32_t height) {
