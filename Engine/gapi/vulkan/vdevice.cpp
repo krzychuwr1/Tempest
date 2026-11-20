@@ -1037,8 +1037,12 @@ void VDevice::waitAny(uint64_t timeout) {
     auto& i = timeline.timepoint[id];
     if(i==nullptr)
       continue;
+    if(i->status!=VK_NOT_READY)
+      continue;
     auto st = vkGetFenceStatus(device.impl, i->fence);
     i->setStatus(st);
+    if(st!=VK_NOT_READY)
+      vkAssert(st);
     }
   }
 
