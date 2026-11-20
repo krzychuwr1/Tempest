@@ -30,6 +30,7 @@ class AndroidApi final : SystemApi {
     // the main window reports this client size and UI scale, and renders whether or not Android shows a window.
     static void                  setExternalPresentation(int width, int height, float uiScale);
     static bool                  hasExternalPresentation();
+    static bool                  activityResumed();
 
     // Latest state of a Bluetooth/USB gamepad; its buttons never reach the window as key events.
     static GamepadState          gamepad();

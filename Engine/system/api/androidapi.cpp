@@ -225,6 +225,10 @@ bool AndroidApi::hasExternalPresentation() {
   return externalPresentation;
   }
 
+bool AndroidApi::activityResumed() {
+  return resumed;
+  }
+
 AndroidApi::GamepadState AndroidApi::gamepad() {
   auto state = gamepadState;
   state.connected |= gamepadKeys.connected;
@@ -668,16 +672,19 @@ void AndroidApi::implProcessEvents(AppCallBack& cb) {
   int                  pending = 0;
   android_poll_source* source  = nullptr;
   const bool          visible = externalPresentation ? resumed : (active && hasWindow);
-  if(ALooper_pollOnce(visible ? 0 : -1,nullptr,&pending,reinterpret_cast<void**>(&source))>=0) {
+  // OpenXR session events arrive outside the Android looper. Keep its
+  // frame callback alive to handle STOPPING even while the activity sleeps.
+  const int timeoutMs = visible ? 0 : (externalPresentation ? 100 : -1);
+  if(ALooper_pollOnce(timeoutMs,nullptr,&pending,reinterpret_cast<void**>(&source))>=0) {
     if (source != nullptr)
       source->process(app, source);
     return;
     }
 
-  if(!visible || isExit.load())
+  if((!visible && !externalPresentation) || isExit.load())
     return;
 
-  if(cb.onTimer()==0)
+  if(visible && cb.onTimer()==0)
     std::this_thread::yield();
 
   if(mainWindow!=nullptr)
