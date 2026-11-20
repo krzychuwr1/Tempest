@@ -184,7 +184,7 @@ VkImageViewCreateInfo VTexture::createInfo(const ComponentMapping* cmap, uint32_
 
 VkImageLayout VTexture::defaultLayout() const {
   if(borrowed)
-    return VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    return nativeIsDepthFormat(format) ? VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
   if(nativeIsDepthFormat(format))
     return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
   if(isStorageImage)

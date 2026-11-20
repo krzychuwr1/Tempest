@@ -30,6 +30,7 @@ class ZBuffer final {
 
   friend class Tempest::Device;
   friend class Tempest::DescriptorSet;
+  friend struct Tempest::Detail::VulkanInteropAccess;
   friend class Encoder<Tempest::CommandBuffer>;
 
   template<class T>
