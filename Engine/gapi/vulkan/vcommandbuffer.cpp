@@ -132,15 +132,9 @@ static VkImageLayout toLayout(ResourceLayout rs, const VTexture* texture) {
   if(rs==ResourceLayout::TransferDst)
     return VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
   if(rs==ResourceLayout::Default) {
-    if(texture==nullptr)
+    if(texture==nullptr || texture->isSwapchainImage())
       return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    if(nativeIsDepthFormat(texture->format))
-      return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-    if(texture->isSwapchainImage())
-      return VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-    if(texture->isStorageImage)
-      return VK_IMAGE_LAYOUT_GENERAL;
-    return VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    return texture->defaultLayout();
     }
 
   if(rs==ResourceLayout::ColorAttach)
@@ -329,7 +323,7 @@ void VCommandBuffer::begin(SyncHint hint) {
       VkQueryPoolCreateInfo qi = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
       qi.queryType  = VK_QUERY_TYPE_TIMESTAMP;
       qi.queryCount = MaxProfQueries;
-      vkCreateQueryPool(device.device.impl, &qi, nullptr, &profPool);
+      vkAssert(vkCreateQueryPool(device.device.impl, &qi, nullptr, &profPool));
       }
     vkCmdResetQueryPool(impl, profPool, 0, MaxProfQueries);
     profMark("start");
