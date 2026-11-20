@@ -48,6 +48,7 @@ static bool             active     = false;
 static bool             hasWindow  = false;
 
 static bool             externalPresentation = false;
+static bool             externalInputFocus   = true;
 static int              externalW            = 0;
 static int              externalH            = 0;
 static float            externalUiScale      = 1.f;
@@ -60,6 +61,12 @@ static std::chrono::steady_clock::time_point nextPadCheck;
 static Point                    mouseLast;
 static bool                     mouseValid = false;
 static int32_t                  mousePressed = 0;
+
+struct HeldKey {
+  Event::KeyType key;
+  uint64_t       source;
+  };
+static std::vector<HeldKey> heldKeys;
 
 // Touches are recorded during polling and dispatched one per event-processing pass.
 // Modal loops in event handlers poll recursively, so direct dispatch could reorder pointers of one AInputEvent.
@@ -233,6 +240,13 @@ bool AndroidApi::activityResumed() {
   return resumed;
   }
 
+void AndroidApi::setExternalInputFocus(bool hasFocus) {
+  if(externalInputFocus==hasFocus)
+    return;
+  externalInputFocus = hasFocus;
+  updateFocus(!hasFocus);
+  }
+
 static void selectPad(int32_t& current, AndroidApi::GamepadState& state, const AInputEvent* event) {
   const int32_t id = AInputEvent_getDeviceId(event);
   if(current!=id) {
@@ -295,12 +309,32 @@ AndroidApi::GamepadState AndroidApi::gamepad() {
   return state;
   }
 
+void AndroidApi::dispatchInputKey(Tempest::Window& window, KeyEvent& event, uint64_t source, bool repeat) {
+  const uint32_t capture = 0x80000000u | uint32_t(event.key);
+  auto sameKey = [&](const HeldKey& held) { return held.key==event.key; };
+  auto it = std::find_if(heldKeys.begin(), heldKeys.end(), [&](const HeldKey& held) {
+    return sameKey(held) && held.source==source;
+    });
+  if(event.type()==Event::KeyDown) {
+    if(it==heldKeys.end()) {
+      if(repeat) // The original press was cancelled on focus loss.
+        return;
+      const bool alreadyDown = std::any_of(heldKeys.begin(), heldKeys.end(), sameKey);
+      heldKeys.push_back({event.key,source});
+      if(alreadyDown)
+        return;
+      }
+    dispatchKeyDown(window,event,capture);
+    } else if(it!=heldKeys.end()) {
+    heldKeys.erase(it);
+    if(std::none_of(heldKeys.begin(), heldKeys.end(), sameKey))
+      dispatchKeyUp(window,event,capture);
+    }
+  }
+
 void AndroidApi::dispatchGamepadKey(Tempest::Window& window, KeyEvent& event) {
-  const uint32_t scan = 0x80000000u | uint32_t(event.key);
-  if(event.type()==Event::KeyDown)
-    dispatchKeyDown(window,event,scan);
-  else
-    dispatchKeyUp(window,event,scan);
+  // Physical scans use their device ID and a real scan or a tagged keycode.
+  dispatchInputKey(window,event,UINT64_MAX,false);
   }
 
 void AndroidApi::setPointerCapture(bool capture) {
@@ -336,17 +370,18 @@ void AndroidApi::setPointerCapture(bool capture) {
     app->activity->vm->DetachCurrentThread();
   }
 
-void AndroidApi::updateFocus() {
-  const bool next = resumed && focused;
-  if(active==next)
+void AndroidApi::updateFocus(bool cancel) {
+  const bool next = resumed && focused && (!externalPresentation || externalInputFocus);
+  if(active==next && !cancel)
     return;
   active = next;
   if(!active) {
+    heldKeys.clear();
     gamepadState = {};
     gamepadKeys = {};
     mouseValid = false;
     mousePressed = 0;
-    releaseAllTouches();
+    touches.clear(); // Drop pending downs together with the dispatcher's captures.
     }
   if(mainWindow!=nullptr) {
     FocusEvent event(active,Event::FocusReason::UnknownReason);
@@ -450,9 +485,15 @@ bool AndroidApi::processKeyEvent(const void* input) {
   uint32_t scan = uint32_t(AKeyEvent_getScanCode(event));
   if(scan==0)
     scan = 0x40000000u | uint32_t(code);
-  if(down)
-    SystemApi::dispatchKeyDown(*mainWindow,e,scan); else
-    SystemApi::dispatchKeyUp  (*mainWindow,e,scan);
+  if(kt==Event::K_NoKey) {
+    // Character-only keys have no logical identity to share with a gamepad.
+    if(down)
+      dispatchKeyDown(*mainWindow,e,scan); else
+      dispatchKeyUp(*mainWindow,e,scan);
+    } else {
+    const uint64_t source = (uint64_t(uint32_t(AInputEvent_getDeviceId(event)))<<32) | scan;
+    dispatchInputKey(*mainWindow,e,source,AKeyEvent_getRepeatCount(event)>0);
+    }
   return true;
   }
 
@@ -527,6 +568,8 @@ bool AndroidApi::processMouseEvent(const void* input) {
   }
 
 int32_t AndroidApi::onInputEvent(const void* input) {
+  if(externalPresentation && !externalInputFocus)
+    return 0;
   const auto    event  = static_cast<const AInputEvent*>(input);
   const int32_t source = AInputEvent_getSource(event);
   if(AInputEvent_getType(event)==AINPUT_EVENT_TYPE_KEY)
@@ -650,6 +693,8 @@ SystemApi::Window* AndroidApi::implCreateWindow(Tempest::Window* owner, ShowMode
   }
 
 void AndroidApi::implDestroyWindow(SystemApi::Window*) {
+  heldKeys.clear();
+  externalInputFocus = true;
   mainWindow = nullptr;
   touches.clear();
   }

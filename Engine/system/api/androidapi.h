@@ -31,6 +31,7 @@ class AndroidApi final : SystemApi {
     static void                  setExternalPresentation(int width, int height, float uiScale);
     static bool                  hasExternalPresentation();
     static bool                  activityResumed();
+    static void                  setExternalInputFocus(bool hasFocus);
 
     // Latest state of a Bluetooth/USB gamepad; its buttons never reach the window as key events.
     static GamepadState          gamepad();
@@ -48,9 +49,10 @@ class AndroidApi final : SystemApi {
     static int32_t onInputEvent(const void* event);
     static bool processTouchEvents(AppCallBack& cb);
     static bool processKeyEvent(const void* event);
+    static void dispatchInputKey(Tempest::Window& window, KeyEvent& event, uint64_t source, bool repeat);
     static bool processMouseEvent(const void* event);
     static Rect implClientRectOf();
-    static void updateFocus();
+    static void updateFocus(bool cancel = false);
     static void updateWindow();
 
     Window* implCreateWindow(Tempest::Window* owner, uint32_t width, uint32_t height) override;
