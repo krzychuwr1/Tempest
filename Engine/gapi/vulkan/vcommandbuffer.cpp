@@ -143,7 +143,7 @@ static VkImageLayout toLayout(ResourceLayout rs, const VTexture* texture) {
   if(rs==ResourceLayout::DepthReadOnly)
     return VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
   if(rs==ResourceLayout::DepthAttach)
-    return VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    return VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
   return VK_IMAGE_LAYOUT_GENERAL;
   }
