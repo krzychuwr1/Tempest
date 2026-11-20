@@ -454,6 +454,7 @@ void VDevice::deviceProps(VkInstance instance, const bool hasDeviceFeatures2, Vk
 
   VkPhysicalDeviceProperties prop = {};
   vkGetPhysicalDeviceProperties(physicalDevice, &prop);
+  props.timestampPeriod = prop.limits.timestampPeriod;
   props.nonCoherentAtomSize = size_t(prop.limits.nonCoherentAtomSize);
   if(props.nonCoherentAtomSize==0)
     props.nonCoherentAtomSize=1;
@@ -849,6 +850,10 @@ void VDevice::deviceQueueProps(VkPhysicalDevice device, VkProps& props) {
 
   props.graphicsFamily = graphics;
   props.presentFamily  = present;
+  if(graphics!=uint32_t(-1)) {
+    const auto bits = queueFamilies[graphics].timestampValidBits;
+    props.timestampMask = bits==64 ? UINT64_MAX : ((uint64_t(1)<<bits)-1);
+    }
   }
 
 VDevice::SwapChainSupport VDevice::querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface) const {

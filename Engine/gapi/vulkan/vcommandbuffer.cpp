@@ -263,7 +263,9 @@ void VCommandBuffer::profMark(std::string_view name) {
   }
 
 void VCommandBuffer::profCollect() {
-  if(profPool==VK_NULL_HANDLE || profCount<2) {
+  // Internal upload buffers contain only the start/end timestamps. They
+  // must not count as additional views in the per-view timing report.
+  if(profPool==VK_NULL_HANDLE || profCount<=2 || profNames.back()!="end") {
     profCount = 0;
     profNames.clear();
     return;
@@ -272,13 +274,11 @@ void VCommandBuffer::profCollect() {
   const VkResult r = vkGetQueryPoolResults(device.device.impl, profPool, 0, profCount, ts.size()*sizeof(uint64_t),
                                            ts.data(), sizeof(uint64_t), VK_QUERY_RESULT_64_BIT);
   if(r==VK_SUCCESS) {
-    VkPhysicalDeviceProperties props = {};
-    vkGetPhysicalDeviceProperties(device.physicalDevice, &props);
-    const double toMs = double(props.limits.timestampPeriod)/1e6;
+    const double toMs = double(device.props.timestampPeriod)/1e6;
     auto& p = gpuProfile();
     std::lock_guard<std::mutex> guard(p.sync);
     for(uint32_t i=0; i+1<profCount; ++i) {
-      const double ms = double(ts[i+1]-ts[i])*toMs;
+      const double ms = double((ts[i+1]-ts[i]) & device.props.timestampMask)*toMs;
       bool found = false;
       for(auto& t:p.totals)
         if(t.first==profNames[i]) {
@@ -318,7 +318,7 @@ void VCommandBuffer::begin(SyncHint hint) {
 
   // The previous recording has completed when a command buffer is reused
   profCollect();
-  if(gpuProfile().enabled) {
+  if(gpuProfile().enabled && device.props.timestampMask!=0) {
     if(profPool==VK_NULL_HANDLE) {
       VkQueryPoolCreateInfo qi = {VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
       qi.queryType  = VK_QUERY_TYPE_TIMESTAMP;
@@ -335,14 +335,14 @@ void VCommandBuffer::begin() {
   }
 
 void VCommandBuffer::end() {
-  if(profPool!=VK_NULL_HANDLE && profCount>0)
-    profMark("end");
   if(isDbgRegion) {
     device.vkCmdDebugMarkerEnd(impl);
     isDbgRegion = false;
     }
   swapchainSync.reserve(swapchainSync.size());
   resState.finalize(*this);
+  if(profCount>0)
+    profMark("end");
   state = NoRecording;
 
   pushChunk();

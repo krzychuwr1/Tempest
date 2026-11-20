@@ -328,6 +328,8 @@ class VDevice : public AbstractGraphicsApi::Device {
     struct VkProps : Tempest::AbstractGraphicsApi::Props {
       uint32_t graphicsFamily = uint32_t(-1);
       uint32_t presentFamily  = uint32_t(-1);
+      uint64_t timestampMask  = 0;
+      float    timestampPeriod = 0.f;
 
       uint32_t vendorID = 0;
 
