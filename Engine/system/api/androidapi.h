@@ -20,6 +20,12 @@ class AndroidApi final : SystemApi {
       bool  buttons[Count] = {};
       };
 
+    struct GamepadSample {
+      GamepadState state;
+      GamepadState releaseSources;
+      bool         interrupted = false;
+      };
+
     static std::filesystem::path internalDataPath();
     static std::filesystem::path externalDataPath();
     // Current window of the activity, or null while it is hidden or for another activity
@@ -35,6 +41,7 @@ class AndroidApi final : SystemApi {
 
     // Latest state of a Bluetooth/USB gamepad; its buttons never reach the window as key events.
     static GamepadState          gamepad();
+    static GamepadSample         pollGamepad();
     // Deliver a mapped gamepad key to the focused widget, including modal overlays.
     static void                  dispatchGamepadKey(Tempest::Window& window, KeyEvent& event);
 
