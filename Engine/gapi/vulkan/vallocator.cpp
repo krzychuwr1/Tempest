@@ -244,11 +244,9 @@ VTexture VAllocator::alloc(const Pixmap& pm, uint32_t mip, VkFormat format) {
   ret.page = allocMemory(memRq,memId.heapId,memId.typeId,false);
 
   if(!ret.page.page) {
-    ret.alloc = nullptr;
     throw std::system_error(Tempest::GraphicsErrc::OutOfHostMemory);
     }
   if(!commit(ret.page.page->memory,ret.page.page->mmapSync,ret.impl,ret.page.offset)) {
-    ret.alloc = nullptr;
     throw std::system_error(Tempest::GraphicsErrc::OutOfHostMemory);
     }
 
@@ -306,11 +304,9 @@ VTexture VAllocator::alloc(const uint32_t w, const uint32_t h, const uint32_t d,
   ret.page = allocMemory(memRq,memId.heapId,memId.typeId,false);
 
   if(!ret.page.page) {
-    ret.alloc = nullptr;
     throw std::system_error(Tempest::GraphicsErrc::OutOfHostMemory);
     }
   if(!commit(ret.page.page->memory,ret.page.page->mmapSync,ret.impl,ret.page.offset)) {
-    ret.alloc = nullptr;
     throw std::system_error(Tempest::GraphicsErrc::OutOfHostMemory);
     }
 
